@@ -1,25 +1,57 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/google/uuid"
+
 	"orchestrator/internal/docker"
 	"orchestrator/internal/models"
 )
 
 type WorkerAgent struct {
 	Port string
+	NodeID string
 	dm *docker.DockerManager 
 }
 
 func CreateWorkerAgent(port string, manager *docker.DockerManager) *WorkerAgent {
 	return &WorkerAgent {
+		NodeID: uuid.NewString(),
 		Port: port,
 		dm: manager,
 	}
 }
+
+func (wa *WorkerAgent) RegisterToMaster(masterAddress string) error {
+
+	node := models.Node {
+		ID: wa.NodeID,
+		Address: "http://localhost" + wa.Port,
+	}
+
+	jsonNode, err := json.Marshal(node)
+	if err != nil {
+		return fmt.Errorf("An error occured while creating the JSON with the worker node data: %v", err)
+	}
+
+	resp, err := http.Post(masterAddress+"/worker/register", "application/json", bytes.NewBuffer(jsonNode))
+	if err != nil {
+		return fmt.Errorf("Failed to register worker node to master: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusCreated {
+		fmt.Printf("Registered to master (ID: %s)\n", node.ID)
+	}
+	return nil
+}
+
+
 func (wa *WorkerAgent) StartWorker() error {
 	http.HandleFunc("/task/start", wa.HandleStartTask)
 	http.HandleFunc("/task/stop", wa.HandleStopTask)
@@ -54,8 +86,8 @@ func (wa *WorkerAgent) HandleStartTask(w http.ResponseWriter, r * http.Request) 
 		return
 	}
 
-	// task.ContainerID = containerID
-	// task.State = models.Running
+	task.ContainerID = containerID
+	task.State = models.Running
 	
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(fmt.Sprintf("Task started successfully. Container ID: %s", containerID)))

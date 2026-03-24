@@ -8,12 +8,27 @@ import (
 	"net/http"
 	"time"
 
+	"orchestrator/internal/master"
 	"orchestrator/internal/models"
+	"orchestrator/internal/store"
 )
 
 func main() {
 	fmt.Println("Starting master node (testing)...")
 
+	dbStore, err := store.CreateStore("master.db")
+	if err != nil {
+		log.Fatalf("Failed to create the store: %v", err)
+	}
+
+	m := master.CreateMaster(":3000", dbStore)
+	go func() {
+		if err := m.StartMaster(); err != nil {
+			log.Fatalf("Failed to start master: %v", err)
+		}
+	}()
+	fmt.Println("Master node is running on port 3000... Waiting for worker nodes.")
+	time.Sleep(10 * time.Second)
 	task := models.Task{
 		ID:            "task-test-1",
 		Image:         "nginx:latest",

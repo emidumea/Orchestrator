@@ -14,17 +14,13 @@ func main() {
 	}
 
 	workerAgent := worker.CreateWorkerAgent(":8080", manager)
+	err = workerAgent.RegisterToMaster("http://localhost:3000")
+	if err != nil {
+		log.Fatalf("Failed to register to master: %v", err)
+	}
+	
 	if err := workerAgent.StartWorker(); err != nil {
 		log.Fatalf("Error starting worker agent: %v", err)
 	}
-	//taskConfig := docker.ContainerInfo{ContainerName: "test-nginx", ImageName: "nginx:latest"}
 
-	//fmt.Printf("Trying to download and start image %s...\n", taskConfig.ImageName)
-	//containerID, err := manager.StartContainer(context.Background(), taskConfig)
-	//if err != nil {
-	//	log.Fatalf("An error occured while starting container: %v", err)
-
-	//}
-
-	//fmt.Printf("Container started successfully. ID: %s\n", containerID)
 }
