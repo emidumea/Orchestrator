@@ -27,13 +27,13 @@ func main() {
 			log.Fatalf("Failed to start master: %v", err)
 		}
 	}()
+
 	fmt.Println("Master node is running on port 3000... Waiting for worker nodes.")
 	time.Sleep(10 * time.Second)
+
 	task := models.Task{
-		ID:            "task-test-1",
 		Image:         "nginx:latest",
-		ContainerName: "nginx-from-master",
-		State:         models.Scheduled,
+		ContainerName: "nginx-node",
 	}
 
 	jsonTask, err := json.Marshal(task)
@@ -41,29 +41,16 @@ func main() {
 		log.Fatalf("An error occured while creating the JSON: %v", err)
 	}
 
-	startURL := "http://localhost:8080/task/start"
-	respStart, err := http.Post(startURL, "application/json", bytes.NewBuffer(jsonTask))
+	submitURL := "http://localhost:3000/task/submit"
+	respSubmit, err := http.Post(submitURL, "application/json", bytes.NewBuffer(jsonTask))
 	if err != nil {
-		log.Fatalf("Failed to create resource at: %s. Error: %v)", startURL, err)
+		log.Fatalf("Failed to submit task to master. Error: %v", err)
+	}
+	defer respSubmit.Body.Close()
+
+	if respSubmit.StatusCode == http.StatusCreated {
+		fmt.Println("Task submitted to master successfully. The task is now pending and waiting to be scheduled.")
 	}
 
-	if respStart.StatusCode == http.StatusCreated {
-		fmt.Println("Task created successfully.")
-	}
-
-	respStart.Body.Close()
-
-	fmt.Println("Sendind stop request in 5 seconds...")
-	time.Sleep(5 * time.Second)
-
-	stopURL := "http://localhost:8080/task/stop"
-	respStop, err := http.Post(stopURL, "application/json", bytes.NewBuffer(jsonTask))
-	if err != nil {
-		log.Fatalf("Failed to create resource at: %s. Error: %v)", stopURL, err)
-	}
-	defer respStop.Body.Close()
-
-	if respStop.StatusCode == http.StatusOK {
-		fmt.Println("Task stopped successfully.")
-	}
+	select {}
 }

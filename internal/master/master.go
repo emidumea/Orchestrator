@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"orchestrator/internal/models"
 	"orchestrator/internal/store"
-
 )
 type Master struct {
 	Port string
@@ -28,7 +29,9 @@ func CreateMaster(port string, store *store.Store) *Master {
 }
 
 func (m *Master) StartMaster() error {
+	go m.StartScheduler()
 	http.HandleFunc("/worker/register", m.HandleRegisterWorkerNode)
+	http.HandleFunc("/task/submit", m.HandleSubmitTask)
 
 	return http.ListenAndServe(m.Port, nil)
 }
@@ -47,7 +50,6 @@ func (m *Master) HandleRegisterWorkerNode(w http.ResponseWriter, r * http.Reques
 		return
 	}
 
-	//node.ID = uuid.NewString()
 	node.State = models.NodeActive
 	node.LastSeen = time.Now()
 
@@ -64,3 +66,37 @@ func (m *Master) HandleRegisterWorkerNode(w http.ResponseWriter, r * http.Reques
 	json.NewEncoder(w).Encode(node)
 
 }
+
+func (m *Master) HandleSubmitTask(w http.ResponseWriter, r * http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var task models.Task
+	err := json.NewDecoder(r.Body).Decode(&task)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	task.ID = uuid.NewString()
+
+	task.State = models.Pending
+
+	if task.ContainerName == "" {
+		task.ContainerName = fmt.Sprintf("task-%s", task.ID[:8])
+	}
+
+	err = m.Store.SaveTask(task)
+	if err != nil {
+		http.Error(w, "Failed to save task", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("[Master] Received task %s and saved it successfully.\n", task.ID)
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(task)
+}
+

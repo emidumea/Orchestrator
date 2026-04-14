@@ -31,7 +31,7 @@ func (wa *WorkerAgent) RegisterToMaster(masterAddress string) error {
 
 	node := models.Node {
 		ID: wa.NodeID,
-		Address: "http://localhost" + wa.Port,
+		Address: "localhost" + wa.Port,
 	}
 
 	jsonNode, err := json.Marshal(node)
