@@ -33,7 +33,7 @@ func main() {
 
 	task := models.Task{
 		Image:         "nginx:latest",
-		ContainerName: "nginx-node",
+		//ContainerName: "nginx-node",
 	}
 
 	jsonTask, err := json.Marshal(task)

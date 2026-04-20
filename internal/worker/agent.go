@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,48 +10,34 @@ import (
 
 	"orchestrator/internal/docker"
 	"orchestrator/internal/models"
+	"orchestrator/internal/gossip"
 )
 
 type WorkerAgent struct {
 	Port string
 	NodeID string
 	dm *docker.DockerManager 
+	Gossip *gossip.GossipManager
 }
 
-func CreateWorkerAgent(port string, manager *docker.DockerManager) *WorkerAgent {
+func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort string, masterGossipAddr string) *WorkerAgent {
+	agentID := uuid.NewString()
+
+	gossipManager := gossip.CreateGossipManager(agentID, gossipPort, port)
+
+	gossipManager.MemList.UpdateMember("master-node", masterGossipAddr, "")
+
 	return &WorkerAgent {
-		NodeID: uuid.NewString(),
+		NodeID: agentID,
 		Port: port,
 		dm: manager,
+		Gossip: gossipManager,
 	}
 }
-
-func (wa *WorkerAgent) RegisterToMaster(masterAddress string) error {
-
-	node := models.Node {
-		ID: wa.NodeID,
-		Address: "localhost" + wa.Port,
-	}
-
-	jsonNode, err := json.Marshal(node)
-	if err != nil {
-		return fmt.Errorf("An error occured while creating the JSON with the worker node data: %v", err)
-	}
-
-	resp, err := http.Post(masterAddress+"/worker/register", "application/json", bytes.NewBuffer(jsonNode))
-	if err != nil {
-		return fmt.Errorf("Failed to register worker node to master: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusCreated {
-		fmt.Printf("Registered to master (ID: %s)\n", node.ID)
-	}
-	return nil
-}
-
 
 func (wa *WorkerAgent) StartWorker() error {
+	wa.Gossip.Start()
+	
 	http.HandleFunc("/task/start", wa.HandleStartTask)
 	http.HandleFunc("/task/stop", wa.HandleStopTask)
 
@@ -89,9 +74,9 @@ func (wa *WorkerAgent) HandleStartTask(w http.ResponseWriter, r * http.Request) 
 	task.ContainerID = containerID
 	task.State = models.Running
 	
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(fmt.Sprintf("Task started successfully. Container ID: %s", containerID)))
-
+	json.NewEncoder(w).Encode(task)
 }
 
 func (wa* WorkerAgent) HandleStopTask(w http.ResponseWriter, r *http.Request) {

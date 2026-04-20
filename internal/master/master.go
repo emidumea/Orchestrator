@@ -1,14 +1,15 @@
 package master
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"encoding/json"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"orchestrator/internal/gossip"
 	"orchestrator/internal/models"
 	"orchestrator/internal/store"
 )
@@ -17,22 +18,26 @@ type Master struct {
 	Store *store.Store
 	WorkerNodes map[string]*models.Node
 	mu sync.Mutex
-
+	Gossip *gossip.GossipManager
 }
 
 func CreateMaster(port string, store *store.Store) *Master {
+	gossipManager := gossip.CreateGossipManager("master-node", ":8081", port)
+
 	return &Master {
 		Port: port,
 		Store: store,
 		WorkerNodes: make(map[string]*models.Node),
+		Gossip: gossipManager,
 	}
 }
 
 func (m *Master) StartMaster() error {
+	m.Gossip.Start()
 	go m.StartScheduler()
 	http.HandleFunc("/worker/register", m.HandleRegisterWorkerNode)
 	http.HandleFunc("/task/submit", m.HandleSubmitTask)
-
+	http.HandleFunc("/tasks", m.HandleGetAllTasks)
 	return http.ListenAndServe(m.Port, nil)
 }
 
@@ -98,5 +103,21 @@ func (m *Master) HandleSubmitTask(w http.ResponseWriter, r * http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(task)
+}
+
+func (m *Master) HandleGetAllTasks(w http.ResponseWriter, r * http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tasks, err := m.Store.ListTasks()
+	if err != nil {
+		http.Error(w, "Failed to fetch all tasks", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tasks)
 }
 

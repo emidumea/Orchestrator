@@ -8,6 +8,7 @@ import (
 	"bytes"
 
 	"orchestrator/internal/models"
+	"orchestrator/internal/gossip"
 )
 
 func (m *Master) StartScheduler() {
@@ -22,9 +23,8 @@ func (m *Master) StartScheduler() {
 			continue
 		}
 
-		m.mu.Lock()
-		workerCount := len(m.WorkerNodes)
-		m.mu.Unlock()
+		activeWorkers := m.Gossip.MemList.GetActiveMembers(m.Gossip.NodeID)
+		workerCount := len(activeWorkers)
 
 		if workerCount == 0 {
 			fmt.Println("[Scheduler] No worker nodes available at the moment.")
@@ -33,14 +33,9 @@ func (m *Master) StartScheduler() {
 
 		for _, task := range tasks {
 			if task.State == models.Pending {
-				var assignedWorker *models.Node
-				m.mu.Lock()
-				for _, worker := range m.WorkerNodes {
-					assignedWorker = worker
-					break
-				}
 
-				m.mu.Unlock()
+				assignedWorker := activeWorkers[0]
+
 
 				fmt.Printf("[Scheduler] Assigning task %s to worker %s\n", task.ID, assignedWorker.ID)
 
@@ -55,14 +50,14 @@ func (m *Master) StartScheduler() {
 	}
 }
 
-func (m *Master) dispatchTask(task models.Task, worker *models.Node) error {
+func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 
 	jsonTask, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("[Scheduler] An error occured while creating the JSON with the task data: %v", err)
 	}
 
-	startURL := "http://" + worker.Address + "/task/start"
+	startURL := "http://" + worker.APIPort + "/task/start"
 	resp, err := http.Post(startURL, "application/json", bytes.NewBuffer(jsonTask))
 	if err != nil {
 		return fmt.Errorf("[Scheduler] Failed to schedule task %s to worker %s: %v\n", task.ID, worker.ID, err)
@@ -73,10 +68,15 @@ func (m *Master) dispatchTask(task models.Task, worker *models.Node) error {
 	if resp.StatusCode == http.StatusCreated {
 		fmt.Printf("[Scheduler] Task %s scheduled to worker %s successfully:\n", task.ID, worker.ID)
 
-		task.State = models.Scheduled
-		task.WorkerID = worker.ID
+		var updatedTask models.Task
+		err := json.NewDecoder(resp.Body).Decode(&updatedTask)
+		if err != nil {
+			return fmt.Errorf("[Scheduler] An error occured while decoding the response from worker: %v", err)
+		}
+		
+		updatedTask.WorkerID = worker.ID
 
-		return m.Store.SaveTask(task)
+		return m.Store.SaveTask(updatedTask)
 	}
 
 	return fmt.Errorf("Worker returned status code: %d", resp.StatusCode)
