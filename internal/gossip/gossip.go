@@ -12,6 +12,7 @@ type GossipManager struct {
 	APIPort string
 	MemList *MembershipList
 	Transport *Transport
+	OnNodeDown func(nodeID string)
 }
 
 func CreateGossipManager(nodeID string, udpPort string, apiPort string) *GossipManager {
@@ -97,6 +98,10 @@ func (gm *GossipManager) cleanDeadMembersLoop() {
 
 					member.State = Down
 					gm.MemList.Members[id] = member
+
+					if gm.OnNodeDown != nil {
+						go gm.OnNodeDown(id)
+					}
 				}
 			}
 		}

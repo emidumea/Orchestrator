@@ -24,20 +24,28 @@ type Master struct {
 func CreateMaster(port string, store *store.Store) *Master {
 	gossipManager := gossip.CreateGossipManager("master-node", ":8081", port)
 
-	return &Master {
+	m := &Master {
 		Port: port,
 		Store: store,
 		WorkerNodes: make(map[string]*models.Node),
 		Gossip: gossipManager,
 	}
+
+	m.Gossip.OnNodeDown = m.handleNodeFailure
+
+	return m
 }
 
 func (m *Master) StartMaster() error {
+	m.ResetOrphanTasksOnBoot()
 	m.Gossip.Start()
 	go m.StartScheduler()
+
 	http.HandleFunc("/worker/register", m.HandleRegisterWorkerNode)
+
 	http.HandleFunc("/task/submit", m.HandleSubmitTask)
 	http.HandleFunc("/tasks", m.HandleGetAllTasks)
+	http.HandleFunc("/nodes", m.HandleGetNodes)
 	return http.ListenAndServe(m.Port, nil)
 }
 
@@ -121,3 +129,34 @@ func (m *Master) HandleGetAllTasks(w http.ResponseWriter, r * http.Request) {
 	json.NewEncoder(w).Encode(tasks)
 }
 
+func (m *Master) ResetOrphanTasksOnBoot() {
+	fmt.Println("[Master] Checking for orphan tasks on boot...")
+
+	tasks, err := m.Store.ListTasks()
+	if err != nil {
+		fmt.Printf("[Master] Failed to fetch tasks on boot: %v\n", err)
+		return
+	}
+
+	for _, task := range tasks {
+		if task.State == models.Running {
+			fmt.Printf("[Master] Found orphan task %s. Resetting to PENDING.\n", task.ID)
+			task.State = models.Pending
+			task.WorkerID = ""
+			task.ContainerID = ""
+			m.Store.SaveTask(task)
+		}
+	}
+}
+
+func (m *Master) HandleGetNodes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	nodes := m.Gossip.MemList.GetActiveMembers(m.Gossip.NodeID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(nodes)
+}

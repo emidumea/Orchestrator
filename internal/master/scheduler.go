@@ -1,14 +1,15 @@
 package master
 
 import (
-	"fmt"
-	"time"
-	"encoding/json"
-	"net/http"
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
 
-	"orchestrator/internal/models"
 	"orchestrator/internal/gossip"
+	"orchestrator/internal/models"
 )
 
 func (m *Master) StartScheduler() {
@@ -42,6 +43,8 @@ func (m *Master) StartScheduler() {
 				err := m.dispatchTask(task, assignedWorker)
 				if err != nil {
 					fmt.Printf("[Scheduler] Failed to dispatch task %s: %v\n", task.ID, err)
+					task.State = models.Failed
+					m.Store.SaveTask(task)
 					continue
 				}
 			}
@@ -52,12 +55,14 @@ func (m *Master) StartScheduler() {
 
 func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 
+	task.ContainerName = fmt.Sprintf("task-%s-%d", task.ID[:8], time.Now().Unix())
+	
 	jsonTask, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("[Scheduler] An error occured while creating the JSON with the task data: %v", err)
 	}
 
-	startURL := "http://" + worker.APIPort + "/task/start"
+	startURL := "http://localhost" + worker.APIPort + "/task/start"
 	resp, err := http.Post(startURL, "application/json", bytes.NewBuffer(jsonTask))
 	if err != nil {
 		return fmt.Errorf("[Scheduler] Failed to schedule task %s to worker %s: %v\n", task.ID, worker.ID, err)
@@ -79,6 +84,30 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 		return m.Store.SaveTask(updatedTask)
 	}
 
-	return fmt.Errorf("Worker returned status code: %d", resp.StatusCode)
+	bodyMsg, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("Worker returned status code: %d. Docker error: %s", resp.StatusCode, string(bodyMsg))
 
+}
+
+
+
+func (m * Master) handleNodeFailure(nodeID string) {
+	fmt.Printf("[Fault-Tolerance] Node %s is dead. Recovering tasks...\n", nodeID)
+
+	tasks, err := m.Store.ListTasks()
+	if err != nil {
+		fmt.Printf("[Fault-Tolerance] Failed to fetch tasks for recovery: %v\n", err)
+		return
+	}
+
+	for _, task := range tasks {
+		if task.WorkerID == nodeID && task.State == models.Running {
+			fmt.Printf("[Fault-Tolerance] Recovering task %s\n", task.ID)
+
+			task.State = models.Pending
+			task.WorkerID = ""
+			task.ContainerID = ""
+			m.Store.SaveTask(task)
+		}
+	}
 }
