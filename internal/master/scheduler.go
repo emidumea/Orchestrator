@@ -7,20 +7,22 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"log"
 
 	"orchestrator/internal/gossip"
 	"orchestrator/internal/models"
 )
 
 func (m *Master) StartScheduler() {
-	fmt.Println("[Scheduler] Starting task scheduler...")
+	log.Println("[Scheduler] Starting task scheduler...")
 
+	time.Sleep(10 * time.Second)
 	for {
 		time.Sleep(3 * time.Second)
 
 		tasks, err := m.Store.ListTasks()
 		if err != nil {
-			fmt.Printf("[Scheduler] An error occured while fetching tasks: %v", err)
+			log.Printf("[Scheduler] An error occured while fetching tasks: %v", err)
 			continue
 		}
 
@@ -28,25 +30,69 @@ func (m *Master) StartScheduler() {
 		workerCount := len(activeWorkers)
 
 		if workerCount == 0 {
-			fmt.Println("[Scheduler] No worker nodes available at the moment.")
+			log.Println("[Scheduler] No worker nodes available at the moment.")
 			continue
 		}
+
+		const estimatedMemCost uint64 = 50 // suppose each tasks needs at least 50MB of free memory
+		const estimatedCPUCost float64 = 5.0 // suppose it needs at least 5% of free CPU
 
 		for _, task := range tasks {
 			if task.State == models.Pending {
 
-				assignedWorker := activeWorkers[0]
+				var bestWorker *gossip.Member
+				var bestScore float64 = -1
 
 
-				fmt.Printf("[Scheduler] Assigning task %s to worker %s\n", task.ID, assignedWorker.ID)
+				for i := range activeWorkers {
+					worker := &activeWorkers[i]
 
-				err := m.dispatchTask(task, assignedWorker)
+					if worker.MemoryFree < estimatedMemCost {
+						continue
+					}
+
+					score := float64(worker.MemoryFree) * 0.4 + worker.CPUFree * 0.6
+					if score > bestScore {
+						bestScore = score
+						bestWorker = worker
+	
+					}
+				}
+
+				if bestWorker == nil {
+					log.Printf("[Scheduler] Insufficient resources to schedule task %s. Will retry later.\n", task.ID)
+					continue
+				}
+
+
+				log.Printf("[Scheduler] Assigning task %s to worker %s\n", task.ID, bestWorker.ID)
+
+				err := m.dispatchTask(task, *bestWorker)
 				if err != nil {
-					fmt.Printf("[Scheduler] Failed to dispatch task %s: %v\n", task.ID, err)
+					log.Printf("[Scheduler] Failed to dispatch task %s: %v\n", task.ID, err)
 					task.State = models.Failed
 					m.Store.SaveTask(task)
 					continue
 				}
+				
+				for i := range activeWorkers {
+					if activeWorkers[i].ID == bestWorker.ID {
+						activeWorkers[i].MemoryFree -= estimatedMemCost
+						activeWorkers[i].CPUFree -= estimatedCPUCost
+						break
+					}
+				}
+				
+
+				for i := range tasks {
+					if tasks[i].ID == task.ID {
+						tasks[i].State = models.Running
+						tasks[i].WorkerID = bestWorker.ID
+						break
+					}
+				}
+
+
 			}
 		}
 
@@ -71,7 +117,7 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusCreated {
-		fmt.Printf("[Scheduler] Task %s scheduled to worker %s successfully:\n", task.ID, worker.ID)
+		log.Printf("[Scheduler] Task %s scheduled to worker %s successfully:\n", task.ID, worker.ID)
 
 		var updatedTask models.Task
 		err := json.NewDecoder(resp.Body).Decode(&updatedTask)
@@ -92,17 +138,17 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 
 
 func (m * Master) handleNodeFailure(nodeID string) {
-	fmt.Printf("[Fault-Tolerance] Node %s is dead. Recovering tasks...\n", nodeID)
+	log.Printf("[Fault-Tolerance] Node %s is dead. Recovering tasks...\n", nodeID)
 
 	tasks, err := m.Store.ListTasks()
 	if err != nil {
-		fmt.Printf("[Fault-Tolerance] Failed to fetch tasks for recovery: %v\n", err)
+		log.Printf("[Fault-Tolerance] Failed to fetch tasks for recovery: %v\n", err)
 		return
 	}
 
 	for _, task := range tasks {
 		if task.WorkerID == nodeID && task.State == models.Running {
-			fmt.Printf("[Fault-Tolerance] Recovering task %s\n", task.ID)
+			log.Printf("[Fault-Tolerance] Recovering task %s\n", task.ID)
 
 			task.State = models.Pending
 			task.WorkerID = ""

@@ -1,9 +1,11 @@
 package gossip
 
 import (
-	"fmt"
 	"math/rand"
 	"time"
+	"log"
+
+	"orchestrator/internal/models"
 )
 
 
@@ -13,12 +15,13 @@ type GossipManager struct {
 	MemList *MembershipList
 	Transport *Transport
 	OnNodeDown func(nodeID string)
+	GetMetrics func() models.SystemMetrics
 }
 
 func CreateGossipManager(nodeID string, udpPort string, apiPort string) *GossipManager {
 	ml := CreateMembershipList()
 
-	ml.UpdateMember(nodeID, "localhost"+udpPort, apiPort)
+	ml.UpdateMember(nodeID, "localhost"+udpPort, apiPort, 0, 0)
 
 	transport := CreateTransport(udpPort, ml)
 
@@ -28,13 +31,14 @@ func CreateGossipManager(nodeID string, udpPort string, apiPort string) *GossipM
 		MemList: ml,
 		Transport: transport,
 	}
+
 }
 
 func (gm *GossipManager) Start() {
 
 	go func () {
 		if err := gm.Transport.StartListening(); err != nil {
-			fmt.Printf("[Gossip] Error starting gossip transport: %v\n", err)
+			log.Printf("[Gossip] Error starting gossip transport: %v\n", err)
 		}
 	}()
 
@@ -47,7 +51,13 @@ func (gm *GossipManager) Start() {
 
 func (gm *GossipManager) gossipLoop() {
 	for {
-		gm.MemList.UpdateMember(gm.NodeID, gm.Transport.Port, gm.APIPort)
+
+		if (gm.GetMetrics != nil) {
+			metrics := gm.GetMetrics()
+			gm.MemList.UpdateMember(gm.NodeID, gm.Transport.Port, gm.APIPort, metrics.MemoryFree, metrics.CPUFree)
+		} else {
+			gm.MemList.UpdateMember(gm.NodeID, gm.Transport.Port, gm.APIPort, 0, 0)
+		}
 
 		time.Sleep(2 * time.Second)
 
@@ -76,7 +86,7 @@ func (gm *GossipManager) gossipLoop() {
 		for i := 0; i < targetCount; i++ {
 			err := gm.Transport.SendGossip(membersSlice[i].Address)
 			if err != nil {
-				fmt.Printf("[Gossip] Error sending gossip to %s: %v\n", membersSlice[i].Address, err)
+				log.Printf("[Gossip] Error sending gossip to %s: %v\n", membersSlice[i].Address, err)
 			}
 		}
 	}
@@ -94,7 +104,7 @@ func (gm *GossipManager) cleanDeadMembersLoop() {
 
 			if time.Now().Unix() - member.Timestamp > 15 {
 				if member.State == Active {
-					fmt.Printf("[Gossip] WARNING: Node %s is DOWN\n", id)
+					log.Printf("[Gossip] WARNING: Node %s is DOWN\n", id)
 
 					member.State = Down
 					gm.MemList.Members[id] = member

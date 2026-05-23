@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"log"
 
 	"github.com/google/uuid"
 
@@ -25,8 +26,10 @@ func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort st
 
 	gossipManager := gossip.CreateGossipManager(agentID, gossipPort, port)
 
-	gossipManager.MemList.UpdateMember("master-node", masterGossipAddr, "")
+	gossipManager.MemList.UpdateMember("master-node", masterGossipAddr, "", 0, 0)
 
+	gossipManager.GetMetrics = getSystemMetrics
+	
 	return &WorkerAgent {
 		NodeID: agentID,
 		Port: port,
@@ -41,7 +44,7 @@ func (wa *WorkerAgent) StartWorker() error {
 	http.HandleFunc("/task/start", wa.HandleStartTask)
 	http.HandleFunc("/task/stop", wa.HandleStopTask)
 
-	fmt.Printf("Worker agent is listetning on port %s...\n", wa.Port)
+	log.Printf("[Worker %s] agent is listetning on port %s...\n", wa.NodeID[:8], wa.Port)
 	return http.ListenAndServe(wa.Port, nil)
 }
 
@@ -58,7 +61,7 @@ func (wa *WorkerAgent) HandleStartTask(w http.ResponseWriter, r * http.Request) 
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
-	fmt.Printf("Worker agent received task: %s (Image %s)\n", task.ID, task.Image)
+	log.Printf("[Worker %s] agent received task: %s (Image %s)\n", wa.NodeID[:8],task.ID, task.Image)
 
 	containerConfig := docker.ContainerInfo {
 		ContainerName: task.ContainerName,
@@ -93,7 +96,7 @@ func (wa* WorkerAgent) HandleStopTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("Worker agent received a request to stop the task %s (Image %s)", task.ID, task.Image)
+	log.Printf("[Worker %s] agent received a request to stop the task %s (Image %s)", wa.NodeID[:8], task.ID, task.Image)
 
 	err = wa.dm.StopContainer(context.Background(), task.ContainerName)
 	if err != nil {

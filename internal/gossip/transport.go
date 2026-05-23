@@ -1,9 +1,9 @@
 package gossip
 
 import (
-	"fmt"
 	"encoding/json"
 	"net"
+	"log"
 )
 
 type Transport struct {
@@ -30,21 +30,21 @@ func (t *Transport) StartListening() error {
 	}
 	defer conn.Close()
 
-	fmt.Printf("[Gossip] Listening for gossip messages on port %s...\n", t.Port)
+	log.Printf("[Gossip] Listening for gossip messages on port %s...\n", t.Port)
 
 	buffer := make([]byte, 4096)
 
 	for {
 		n, _, err := conn.ReadFromUDP(buffer)
 		if err != nil {
-			fmt.Println("[Gossip] Error reading from UDP socket:", err)
+			log.Println("[Gossip] Error reading from UDP socket:", err)
 			continue
 		}
 
 		var incomingMembers map[string]Member
 		err = json.Unmarshal(buffer[:n], &incomingMembers)
 		if err != nil {
-			fmt.Println("[Gossip] Received invalid gossip message:", err)
+			log.Println("[Gossip] Received invalid gossip message:", err)
 			continue
 		}
 

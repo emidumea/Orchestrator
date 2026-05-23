@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
+	"log"
 	"github.com/google/uuid"
 
 	"orchestrator/internal/gossip"
@@ -71,7 +71,7 @@ func (m *Master) HandleRegisterWorkerNode(w http.ResponseWriter, r * http.Reques
 	m.mu.Unlock()
 
 
-	fmt.Printf("[Master] Registered worker node: %s (Address: %s)\n", node.ID, node.Address)
+	log.Printf("[Master] Registered worker node: %s (Address: %s)\n", node.ID, node.Address)
 
 
 	w.Header().Set("Content-Type", "application/json")
@@ -107,7 +107,7 @@ func (m *Master) HandleSubmitTask(w http.ResponseWriter, r * http.Request) {
 		return
 	}
 
-	fmt.Printf("[Master] Received task %s and saved it successfully.\n", task.ID)
+	log.Printf("[Master] Received task %s and saved it successfully.\n", task.ID)
 
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(task)
@@ -130,17 +130,17 @@ func (m *Master) HandleGetAllTasks(w http.ResponseWriter, r * http.Request) {
 }
 
 func (m *Master) ResetOrphanTasksOnBoot() {
-	fmt.Println("[Master] Checking for orphan tasks on boot...")
+	log.Println("[Master] Checking for orphan tasks on boot...")
 
 	tasks, err := m.Store.ListTasks()
 	if err != nil {
-		fmt.Printf("[Master] Failed to fetch tasks on boot: %v\n", err)
+		log.Printf("[Master] Failed to fetch tasks on boot: %v\n", err)
 		return
 	}
 
 	for _, task := range tasks {
 		if task.State == models.Running {
-			fmt.Printf("[Master] Found orphan task %s. Resetting to PENDING.\n", task.ID)
+			log.Printf("[Master] Found orphan task %s. Resetting to PENDING.\n", task.ID)
 			task.State = models.Pending
 			task.WorkerID = ""
 			task.ContainerID = ""

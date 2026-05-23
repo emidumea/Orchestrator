@@ -3,9 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"orchestrator/internal/master"
@@ -13,8 +14,25 @@ import (
 	"orchestrator/internal/store"
 )
 
+func setupLogger(fileName string) *os.File {
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+
+	multiWriter := io.MultiWriter(os.Stdout, file)
+
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+	log.SetOutput(multiWriter)
+
+	return file
+}
+
 func main() {
-	fmt.Println("Starting master node (testing)...")
+	logFile := setupLogger("orchestrator.log")
+	defer logFile.Close()
+
+	log.Println("Starting master node (testing)...")
 
 	dbStore, err := store.CreateStore("master.db")
 	if err != nil {
@@ -28,7 +46,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("Master node is running on port 3000... Waiting for worker nodes.")
+	log.Println("Master node is running on port 3000... Waiting for worker nodes.")
 	time.Sleep(10 * time.Second)
 
 	task := models.Task{
@@ -49,7 +67,7 @@ func main() {
 	defer respSubmit.Body.Close()
 
 	if respSubmit.StatusCode == http.StatusCreated {
-		fmt.Println("Task submitted to master successfully. The task is now pending and waiting to be scheduled.")
+		log.Println("Task submitted to master successfully. The task is now pending and waiting to be scheduled.")
 	}
 
 	select {}

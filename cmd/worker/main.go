@@ -2,14 +2,32 @@ package main
 
 import (
 	"flag"
-
+	"os"
 	"log"
+	"io"
 
 	"orchestrator/internal/docker"
 	"orchestrator/internal/worker"
 )
 
+func setupLogger(fileName string) *os.File {
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+
+	multiWriter := io.MultiWriter(os.Stdout, file)
+
+	log.SetFlags(log.Ldate | log.Ltime)
+	log.SetOutput(multiWriter)
+
+	return file
+}
+
 func main() {
+	logFile := setupLogger("worker.log")
+	defer logFile.Close()
+
 	apiPort := flag.String("api", ":8080", "HTTP port for worker agent")
 	gossipPort := flag.String("gossip", ":8082", "UDP port for gossip communication")
 	masterAddr := flag.String("master", "localhost:8081", "Gossip address of the seed (master) node")
