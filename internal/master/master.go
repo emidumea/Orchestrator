@@ -12,6 +12,8 @@ import (
 	"orchestrator/internal/gossip"
 	"orchestrator/internal/models"
 	"orchestrator/internal/store"
+	"orchestrator/internal/middleware"
+
 )
 type Master struct {
 	Port string
@@ -19,9 +21,10 @@ type Master struct {
 	WorkerNodes map[string]*models.Node
 	mu sync.Mutex
 	Gossip *gossip.GossipManager
+	Token string
 }
 
-func CreateMaster(port string, store *store.Store) *Master {
+func CreateMaster(port string, store *store.Store, token string) *Master {
 	gossipManager := gossip.CreateGossipManager("master-node", ":8081", port)
 
 	m := &Master {
@@ -29,6 +32,7 @@ func CreateMaster(port string, store *store.Store) *Master {
 		Store: store,
 		WorkerNodes: make(map[string]*models.Node),
 		Gossip: gossipManager,
+		Token: token,
 	}
 
 	m.Gossip.OnNodeDown = m.handleNodeFailure
@@ -37,16 +41,18 @@ func CreateMaster(port string, store *store.Store) *Master {
 }
 
 func (m *Master) StartMaster() error {
+	mux := http.NewServeMux()
+
 	m.ResetOrphanTasksOnBoot()
 	m.Gossip.Start()
 	go m.StartScheduler()
 
-	http.HandleFunc("/worker/register", m.HandleRegisterWorkerNode)
+	mux.HandleFunc("/worker/register", m.HandleRegisterWorkerNode)
 
-	http.HandleFunc("/task/submit", m.HandleSubmitTask)
-	http.HandleFunc("/tasks", m.HandleGetAllTasks)
-	http.HandleFunc("/nodes", m.HandleGetNodes)
-	return http.ListenAndServe(m.Port, nil)
+	mux.HandleFunc("/task/submit", middleware.Auth(m.Token, m.HandleSubmitTask))
+	mux.HandleFunc("/tasks", middleware.Auth(m.Token, m.HandleGetAllTasks))
+	mux.HandleFunc("/nodes", middleware.Auth(m.Token, m.HandleGetNodes))
+	return http.ListenAndServe(m.Port, mux)
 }
 
 func (m *Master) HandleRegisterWorkerNode(w http.ResponseWriter, r * http.Request) {

@@ -109,11 +109,20 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 	}
 
 	startURL := "http://localhost" + worker.APIPort + "/task/start"
-	resp, err := http.Post(startURL, "application/json", bytes.NewBuffer(jsonTask))
+
+	req, err := http.NewRequest("POST", startURL, bytes.NewBuffer(jsonTask))
+	if err != nil {
+		return fmt.Errorf("[Scheduler] Failed to create HTTP request for task %s: %v\n", task.ID, err)
+	}
+	
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+m.Token)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("[Scheduler] Failed to schedule task %s to worker %s: %v\n", task.ID, worker.ID, err)
 	}
-	
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusCreated {

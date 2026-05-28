@@ -1,16 +1,13 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"log"
 	"io"
-	"net/http"
+	"log"
 	"os"
-	"time"
+
+	"github.com/joho/godotenv"
 
 	"orchestrator/internal/master"
-	"orchestrator/internal/models"
 	"orchestrator/internal/store"
 )
 
@@ -32,43 +29,32 @@ func main() {
 	logFile := setupLogger("orchestrator.log")
 	defer logFile.Close()
 
-	log.Println("Starting master node (testing)...")
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("[Warning] No .env file found. Using default environment variables.")
+	}
+
+	token := os.Getenv("ORCHESTRATOR_TOKEN")
+	if token == "" {
+		log.Fatal("ORCHESTRATOR_TOKEN is not set")
+	}
+
+	port := os.Getenv("MASTER_PORT")
+	if port == "" {
+		port = "3000"
+	}
+
+	log.Println("Starting master node ...")
 
 	dbStore, err := store.CreateStore("master.db")
 	if err != nil {
 		log.Fatalf("Failed to create the store: %v", err)
 	}
 
-	m := master.CreateMaster(":3000", dbStore)
-	go func() {
-		if err := m.StartMaster(); err != nil {
-			log.Fatalf("Failed to start master: %v", err)
-		}
-	}()
+	m := master.CreateMaster(":"+port, dbStore, token)
 
-	log.Println("Master node is running on port 3000... Waiting for worker nodes.")
-	time.Sleep(10 * time.Second)
-
-	task := models.Task{
-		Image:         "nginx:latest",
-		//ContainerName: "nginx-node",
+	if err := m.StartMaster(); err != nil {
+		log.Fatalf("Failed to start master: %v", err)
 	}
 
-	jsonTask, err := json.Marshal(task)
-	if err != nil {
-		log.Fatalf("An error occured while creating the JSON: %v", err)
-	}
-
-	submitURL := "http://localhost:3000/task/submit"
-	respSubmit, err := http.Post(submitURL, "application/json", bytes.NewBuffer(jsonTask))
-	if err != nil {
-		log.Fatalf("Failed to submit task to master. Error: %v", err)
-	}
-	defer respSubmit.Body.Close()
-
-	if respSubmit.StatusCode == http.StatusCreated {
-		log.Println("Task submitted to master successfully. The task is now pending and waiting to be scheduled.")
-	}
-
-	select {}
 }

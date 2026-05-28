@@ -6,32 +6,35 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/joho/godotenv"
 )
 
 const masterURL = "http://localhost:3000"
 
 type TaskRequest struct {
-	Image string `json:"image"`
+	Image   string   `json:"image"`
 	Command []string `json:"command,omitempty"`
 }
 
 type TaskResponse struct {
-	ID string `json:"ID"`
-	Image string `json:"Image"`
-	State string `json:"State"`
-	WorkerID string `json:"WorkerID"`
+	ID            string `json:"ID"`
+	Image         string `json:"Image"`
+	State         string `json:"State"`
+	WorkerID      string `json:"WorkerID"`
 	ContainerName string `json:"ContainerName"`
 }
 
 type NodeResponse struct {
-	ID string `json:"id"`
+	ID      string `json:"id"`
 	Address string `json:"address"`
 	APIPort string `json:"api_port"`
-	State string `json:"state"`
+	State   string `json:"state"`
 }
 
 func printUsage() {
@@ -43,9 +46,24 @@ func printUsage() {
 	fmt.Println("  tasks   - List all the tasks from the system")
 }
 
+func getToken() string {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("[Warning] No .env file found. Using default environment variables.")
+	}
+
+	token := os.Getenv("ORCHESTRATOR_TOKEN")
+	if token == "" {
+		log.Fatal("[Error] ORCHESTRATOR_TOKEN is not set in .env file.")
+	}
+	fmt.Printf("DEBUG Token: '%s'\n", token)
+	return token
+}
 func submitTask(image string, command []string) {
-	taskReq := TaskRequest {
-		Image: image,
+	token := getToken()
+
+	taskReq := TaskRequest{
+		Image:   image,
 		Command: command,
 	}
 
@@ -56,14 +74,23 @@ func submitTask(image string, command []string) {
 	}
 
 	fmt.Printf("Submitting task to master (Image: %s, Command: %v)\n", image, command)
-	resp, err := http.Post(masterURL+"/task/submit", "application/json", bytes.NewBuffer(jsonTask))
+	req, err := http.NewRequest("POST", masterURL+"/task/submit", bytes.NewBuffer(jsonTask))
+	if err != nil {
+		fmt.Printf("Failed to create HTTP request to master: %v\n", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("Failed to submit task to master: %v\n", err)
 		return
 	}
 
 	defer resp.Body.Close()
-	
+
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
 		fmt.Println("Task submitted successfully.")
@@ -74,9 +101,20 @@ func submitTask(image string, command []string) {
 }
 
 func listTasks() {
-	resp, err := http.Get(masterURL + "/tasks")
+	token := getToken()
+
+	req, err := http.NewRequest("GET", masterURL+"/tasks", nil)
 	if err != nil {
-		fmt.Printf("Failed to fetch tasks from master: %v\n", err)
+		fmt.Printf("Failed to create HTTP request to master: %v\n", err)
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Failed to submit task to master: %v\n", err)
 		return
 	}
 
@@ -98,7 +136,7 @@ func listTasks() {
 		fmt.Println("No tasks found.")
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3,' ', 0)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "TASK ID\tIMAGE\tSTATE\tWORKER ID\tCONTAINER NAME")
 	fmt.Fprintln(w, "-------\t-----\t-----\t---------\t--------------")
 
@@ -120,11 +158,23 @@ func listTasks() {
 }
 
 func listNodes() {
-	resp, err := http.Get(masterURL + "/nodes")
+	token := getToken()
+
+	req, err := http.NewRequest("GET", masterURL+"/nodes", nil)
 	if err != nil {
-		fmt.Printf("Failed to fetch nodes from master: %v\n", err)
+		fmt.Printf("Failed to create HTTP request to master: %v\n", err)
 		return
 	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("Failed to submit task to master: %v\n", err)
+		return
+	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -138,7 +188,7 @@ func listNodes() {
 		return
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3,' ', 0)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "NODE ID\tADDRESS\tAPI PORT\tSTATE")
 	fmt.Fprintln(w, "-------\t-------\t--------\t-----")
 
@@ -172,7 +222,7 @@ func main() {
 		}
 
 		submitTask(*img, cmdList)
-	
+
 	case "tasks":
 		listTasks()
 

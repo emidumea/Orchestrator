@@ -6,6 +6,8 @@ import (
 	"log"
 	"io"
 
+	"github.com/joho/godotenv"
+
 	"orchestrator/internal/docker"
 	"orchestrator/internal/worker"
 )
@@ -28,6 +30,17 @@ func main() {
 	logFile := setupLogger("worker.log")
 	defer logFile.Close()
 
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("[Warning] No .env file found. Using default environment variables.")
+	}
+
+	token := os.Getenv("ORCHESTRATOR_TOKEN")
+	if token == "" {
+		log.Fatal("ORCHESTRATOR_TOKEN is not set")
+	}
+
+
 	apiPort := flag.String("api", ":8080", "HTTP port for worker agent")
 	gossipPort := flag.String("gossip", ":8082", "UDP port for gossip communication")
 	masterAddr := flag.String("master", "localhost:8081", "Gossip address of the seed (master) node")
@@ -39,7 +52,7 @@ func main() {
 		log.Fatalf("Failed to create docker manager: %v", err)
 	}
 
-	workerAgent := worker.CreateWorkerAgent(*apiPort, manager, *gossipPort, *masterAddr)
+	workerAgent := worker.CreateWorkerAgent(*apiPort, manager, *gossipPort, *masterAddr, token)
 
 	if err := workerAgent.StartWorker(); err != nil {
 		log.Fatalf("Error starting worker agent: %v", err)

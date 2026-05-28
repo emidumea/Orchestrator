@@ -12,6 +12,7 @@ import (
 	"orchestrator/internal/docker"
 	"orchestrator/internal/models"
 	"orchestrator/internal/gossip"
+	"orchestrator/internal/middleware"
 )
 
 type WorkerAgent struct {
@@ -19,9 +20,10 @@ type WorkerAgent struct {
 	NodeID string
 	dm *docker.DockerManager 
 	Gossip *gossip.GossipManager
+	Token string
 }
 
-func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort string, masterGossipAddr string) *WorkerAgent {
+func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort string, masterGossipAddr string, token string) *WorkerAgent {
 	agentID := uuid.NewString()
 
 	gossipManager := gossip.CreateGossipManager(agentID, gossipPort, port)
@@ -35,17 +37,20 @@ func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort st
 		Port: port,
 		dm: manager,
 		Gossip: gossipManager,
+		Token: token,
 	}
 }
 
 func (wa *WorkerAgent) StartWorker() error {
+	mux := http.NewServeMux()
+
 	wa.Gossip.Start()
 	
-	http.HandleFunc("/task/start", wa.HandleStartTask)
-	http.HandleFunc("/task/stop", wa.HandleStopTask)
+	mux.HandleFunc("/task/start", middleware.Auth(wa.Token, wa.HandleStartTask))
+	mux.HandleFunc("/task/stop", middleware.Auth(wa.Token, wa.HandleStopTask))
 
 	log.Printf("[Worker %s] agent is listetning on port %s...\n", wa.NodeID[:8], wa.Port)
-	return http.ListenAndServe(wa.Port, nil)
+	return http.ListenAndServe(wa.Port, mux)
 }
 
 
