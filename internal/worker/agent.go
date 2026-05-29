@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"log"
-
+	"net/http"
+	"sync"
+	"net"
 	"github.com/google/uuid"
 
 	"orchestrator/internal/docker"
-	"orchestrator/internal/models"
 	"orchestrator/internal/gossip"
 	"orchestrator/internal/middleware"
+	"orchestrator/internal/models"
 )
 
 type WorkerAgent struct {
@@ -21,6 +22,9 @@ type WorkerAgent struct {
 	dm *docker.DockerManager 
 	Gossip *gossip.GossipManager
 	Token string
+
+	runningContainers map[string]string
+	mu sync.Mutex
 }
 
 func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort string, masterGossipAddr string, token string) *WorkerAgent {
@@ -28,7 +32,12 @@ func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort st
 
 	gossipManager := gossip.CreateGossipManager(agentID, gossipPort, port)
 
-	gossipManager.MemList.UpdateMember("master-node", masterGossipAddr, "", 0, 0)
+	masterIP, masterPortRaw, err := net.SplitHostPort(masterGossipAddr)
+	if err != nil {
+		log.Fatalf("[Worker] Master address is invalid: %v", err)
+	}
+	masterPort := ":" + masterPortRaw
+	gossipManager.MemList.UpdateMember("master-node", masterIP, masterPort, "", 0, 0)
 
 	gossipManager.GetMetrics = getSystemMetrics
 	
@@ -38,6 +47,7 @@ func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort st
 		dm: manager,
 		Gossip: gossipManager,
 		Token: token,
+		runningContainers: make(map[string]string),
 	}
 }
 
@@ -80,6 +90,9 @@ func (wa *WorkerAgent) HandleStartTask(w http.ResponseWriter, r * http.Request) 
 	}
 
 	task.ContainerID = containerID
+	wa.mu.Lock()
+	wa.runningContainers[task.ID] = containerID
+	wa.mu.Unlock()
 	task.State = models.Running
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -112,4 +125,20 @@ func (wa* WorkerAgent) HandleStopTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(fmt.Sprintf("Task stopped successfully. Container Name: %s", task.ContainerName)))
 
+}
+
+func (wa *WorkerAgent) Shutdown() {
+	wa.mu.Lock()
+	defer wa.mu.Unlock()
+
+	log.Println("[Worker] Stopping all active containers...")
+
+	for taskID, containerID := range wa.runningContainers {
+		log.Printf("[Worker] Stopping container %s (task %s)\n", containerID, taskID)
+		err := wa.dm.StopContainer(context.Background(), containerID)
+		if err != nil {
+			log.Printf("[Worker] Failed to stop container %s: %v\n", containerID, err)
+		}
+	}
+	log.Println("[Worker] Shutdown complete")
 }

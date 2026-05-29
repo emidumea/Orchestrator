@@ -9,6 +9,7 @@ import (
 
 	"orchestrator/internal/master"
 	"orchestrator/internal/store"
+	"orchestrator/internal/utils"
 )
 
 func setupLogger(fileName string) *os.File {
@@ -53,6 +54,12 @@ func main() {
 
 	m := master.CreateMaster(":"+port, dbStore, token)
 
+	myIP := utils.GetLocalIP()
+	log.Printf("--------------------------------")
+	log.Printf("Master node is live")
+	log.Printf("Master address for cli: http//%s:%s", myIP, port)
+	log.Printf("Master address for workers: %s:8081", myIP)
+	log.Printf("--------------------------------")
 	if err := m.StartMaster(); err != nil {
 		log.Fatalf("Failed to start master: %v", err)
 	}

@@ -2,13 +2,16 @@ package main
 
 import (
 	"flag"
-	"os"
-	"log"
 	"io"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/joho/godotenv"
 
 	"orchestrator/internal/docker"
+	"orchestrator/internal/utils"
 	"orchestrator/internal/worker"
 )
 
@@ -47,6 +50,9 @@ func main() {
 
 	flag.Parse()
 
+	myIP := utils.GetLocalIP()
+	log.Printf("[System] Worker node starting on IP: %s", myIP)
+
 	manager, err := docker.CreateDockerManager()
 	if err != nil {
 		log.Fatalf("Failed to create docker manager: %v", err)
@@ -54,8 +60,19 @@ func main() {
 
 	workerAgent := worker.CreateWorkerAgent(*apiPort, manager, *gossipPort, *masterAddr, token)
 
-	if err := workerAgent.StartWorker(); err != nil {
-		log.Fatalf("Error starting worker agent: %v", err)
-	}
+	go func() {
+		if err := workerAgent.StartWorker(); err != nil {
+			log.Fatalf("Error starting worker agent: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	<-stop
+	log.Println("Shuttind down worker agent...")
+	workerAgent.Shutdown()
+	os.Exit(0)
+
 
 }

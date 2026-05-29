@@ -14,7 +14,8 @@ const (
 
 type Member struct {
 	ID string `json:"id"`
-	Address string `json:"address"`
+	IP string `json:"ip"`
+	GossipPort string `json:"gossip_port"`
 	APIPort string `json:"api_port"`
 	State NodeState `json:"state"`
 	Timestamp int64 `json:"timestamp"`
@@ -34,12 +35,13 @@ func CreateMembershipList() *MembershipList {
 	}
 }
 
-func (ml *MembershipList) UpdateMember(id string, address string, apiPort string, memoryFree uint64, cpuFree float64) {
+func (ml *MembershipList) UpdateMember(id string, ip string, gossipPort string, apiPort string, memoryFree uint64, cpuFree float64) {
 	ml.mu.Lock()
 
 	ml.Members[id] = Member {
 			ID: id,
-			Address: address,
+			IP: ip,
+			GossipPort: gossipPort,
 			APIPort: apiPort,
 			State: Active,
 			Timestamp: time.Now().Unix(),

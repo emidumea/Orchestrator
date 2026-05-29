@@ -108,7 +108,8 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 		return fmt.Errorf("[Scheduler] An error occured while creating the JSON with the task data: %v", err)
 	}
 
-	startURL := "http://localhost" + worker.APIPort + "/task/start"
+	startURL := fmt.Sprintf("http://%s%s/task/start", worker.IP, worker.APIPort)
+	
 
 	req, err := http.NewRequest("POST", startURL, bytes.NewBuffer(jsonTask))
 	if err != nil {

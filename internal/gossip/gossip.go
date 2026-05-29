@@ -1,11 +1,12 @@
 package gossip
 
 import (
+	"log"
 	"math/rand"
 	"time"
-	"log"
 
 	"orchestrator/internal/models"
+	"orchestrator/internal/utils"
 )
 
 
@@ -18,12 +19,13 @@ type GossipManager struct {
 	GetMetrics func() models.SystemMetrics
 }
 
-func CreateGossipManager(nodeID string, udpPort string, apiPort string) *GossipManager {
+func CreateGossipManager(nodeID string, gossipPort string, apiPort string) *GossipManager {
 	ml := CreateMembershipList()
 
-	ml.UpdateMember(nodeID, "localhost"+udpPort, apiPort, 0, 0)
+	localIP := utils.GetLocalIP()
+	ml.UpdateMember(nodeID, localIP, gossipPort, apiPort, 0, 0)
 
-	transport := CreateTransport(udpPort, ml)
+	transport := CreateTransport(gossipPort, ml)
 
 	return &GossipManager {
 		NodeID: nodeID,
@@ -54,9 +56,9 @@ func (gm *GossipManager) gossipLoop() {
 
 		if (gm.GetMetrics != nil) {
 			metrics := gm.GetMetrics()
-			gm.MemList.UpdateMember(gm.NodeID, gm.Transport.Port, gm.APIPort, metrics.MemoryFree, metrics.CPUFree)
+			gm.MemList.UpdateMember(gm.NodeID, utils.GetLocalIP(), gm.Transport.Port, gm.APIPort, metrics.MemoryFree, metrics.CPUFree)
 		} else {
-			gm.MemList.UpdateMember(gm.NodeID, gm.Transport.Port, gm.APIPort, 0, 0)
+			gm.MemList.UpdateMember(gm.NodeID, utils.GetLocalIP(), gm.Transport.Port, gm.APIPort, 0, 0)
 		}
 
 		time.Sleep(2 * time.Second)
@@ -84,9 +86,9 @@ func (gm *GossipManager) gossipLoop() {
 		}
 
 		for i := 0; i < targetCount; i++ {
-			err := gm.Transport.SendGossip(membersSlice[i].Address)
+			err := gm.Transport.SendGossip(membersSlice[i].IP + membersSlice[i].GossipPort)
 			if err != nil {
-				log.Printf("[Gossip] Error sending gossip to %s: %v\n", membersSlice[i].Address, err)
+				log.Printf("[Gossip] Error sending gossip to %s: %v\n", membersSlice[i].IP, err)
 			}
 		}
 	}
