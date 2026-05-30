@@ -1,0 +1,131 @@
+/* Base styles */
+
+body {
+    margin: 0;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+#header {
+    padding: 15px 20px;
+    background: #252526;
+    border-bottom: 1px solid #3c3c3c;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+    z-index: 10;
+}
+
+h2 {
+    margin: 0;
+    color: #4fc1ff;
+    font-weight: 400;
+    letter-spacing: 1px;
+}
+
+/* Controls (input and buttons) */
+.controls input {
+    padding: 8px;
+    background: #3c3c3c;
+    border: 1px solid #555;
+    color: white;
+    border-radius: 4px;
+    outline: none;
+    width: 250px;
+}
+
+.controls button {
+    padding: 8px 15px;
+    background: #007acc;
+    border: none;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.controls button:hover {
+    background: #0098ff;
+}
+
+/* Main layout */
+#main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+#network-container {
+    flex: 2;
+    border-right: 1px solid #3c3c3c;
+    background-color: #1a1a1a;
+}
+
+#panel {
+    flex: 1;
+    padding: 20px;
+    background: #252526;
+    overflow-y: auto;
+}
+
+/* Panel details */
+#panel h3 {
+    margin-top: 0;
+    color: #fff;
+}
+
+#status-msg {
+    color: #888;
+}
+
+.detail-box {
+    background: #2d2d2d;
+    padding: 15px;
+    border-radius: 6px;
+    margin-top: 15px;
+    border-left: 4px solid #007acc;
+}
+
+.task-item {
+    background: #333;
+    padding: 10px;
+    margin-top: 8px;
+    border-radius: 4px;
+    border-left: 3px solid #4caf50;
+    font-family: monospace;
+    font-size: 13px;
+}
+
+/* Bagdes and text */
+.badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+    background: #4caf50;
+    color: #000;
+}
+
+.badge.down {
+    background: #f44336;
+    color: white;
+}
+
+.text-muted {
+    color: #888;
+}
+
+.text-error {
+    color: #f44336;
+}
+
+.section-title {
+    margin-top: 20px;
+    color: #fff;
+}

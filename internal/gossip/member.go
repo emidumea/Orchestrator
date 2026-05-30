@@ -80,3 +80,9 @@ func (ml *MembershipList) GetActiveMembers(nodeID string) []Member {
 	}
 	return activeMembers
 }
+
+func (ml *MembershipList) RemoveMember(id string) {
+	ml.mu.Lock()
+	defer ml.mu.Lock()
+	delete(ml.Members, id)
+}

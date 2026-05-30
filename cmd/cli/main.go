@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"orchestrator/internal/models"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -15,7 +17,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const masterURL = "http://localhost:3000"
+var masterURL string
 
 type TaskRequest struct {
 	Image   string   `json:"image"`
@@ -56,6 +58,11 @@ func getToken() string {
 	if token == "" {
 		log.Fatal("[Error] ORCHESTRATOR_TOKEN is not set in .env file.")
 	}
+	masterURL = os.Getenv("MASTER_URL")
+	if masterURL == "" {
+		masterURL = "http://localhost:3000"
+	}
+
 	fmt.Printf("DEBUG Token: '%s'\n", token)
 	return token
 }
@@ -202,6 +209,92 @@ func listNodes() {
 	w.Flush()
 }
 
+
+func handleExport() {
+	token := getToken()
+
+	req, _ := http.NewRequest("GET", masterURL+"/tasks", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatalf("Failed to fetch tasks: %v", err)
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("Failed to get tasks. Status: %d", resp.StatusCode)
+	}
+
+	var tasks []models.Task
+	json.NewDecoder(resp.Body).Decode(&tasks)
+
+	file, err := os.Create("tasks_data.csv")
+	if err != nil {
+		log.Fatalf("Failed to create CSV file: %v", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	header := []string{
+		"Task_ID", 
+		"Image",
+		"State",
+		"Worker_ID",
+		"SubmittedAt_ms",
+		"ScheduledAt_ms",
+		"startedAt_ms",
+		"Wait_Latency_ms",
+		"Boot_Latency_ms",
+		"Execution_Time_ms",
+	}
+
+	writer.Write(header)
+	count := 0
+	for _, task := range tasks {
+		if task.State == models.Running || task.State == models.Failed {
+			waitLatency := task.ScheduledAt - task.SubmittedAt
+			bootLatency := task.StartedAt - task.ScheduledAt
+			totalLatency := task.StartedAt - task.SubmittedAt
+
+			if waitLatency < 0 {
+				waitLatency = 0
+			}
+			if bootLatency < 0 {
+				bootLatency = 0
+			}
+			if totalLatency < 0 {
+				totalLatency = 0
+			}
+
+			workerShortID := task.WorkerID
+			if len(workerShortID) > 8 {
+				workerShortID = workerShortID[:8]
+			}
+
+			row := []string {
+				task.ID[:8],
+				task.Image,
+				string(task.State),
+				workerShortID,
+				fmt.Sprintf("%d", task.SubmittedAt),
+				fmt.Sprintf("%d", task.ScheduledAt),
+				fmt.Sprintf("%d", task.StartedAt),
+				fmt.Sprintf("%d", waitLatency),
+				fmt.Sprintf("%d", bootLatency),
+				fmt.Sprintf("%d", totalLatency),
+			}
+			writer.Write(row)
+			count++
+		}
+	}
+	fmt.Printf("Exported %d tasks to 'tasks_data.csv'\n", count)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -222,6 +315,9 @@ func main() {
 		}
 
 		submitTask(*img, cmdList)
+
+	case "export":
+		handleExport()
 
 	case "tasks":
 		listTasks()

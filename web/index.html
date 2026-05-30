@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Orchestrator</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="header">
+        <h2>Cluster Topology</h2>
+        <div class="controls">
+            <input type="password" id="tokenInput" placeholder="Enter ORCHESTRATOR_TOKEN" />
+            <button onclick="startConnection()">Connect to Cluster</button>
+        </div>
+    </div>
+
+    <div id="main">
+        <div id="network-container"></div>
+        <div id="panel">
+            <h3>Node Details</h3>
+            <p id="status-msg">Enter token and connect to see the cluster live.</p>
+            <div id="details"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

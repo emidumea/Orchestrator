@@ -52,6 +52,10 @@ func (m *Master) StartMaster() error {
 	mux.HandleFunc("/task/submit", middleware.Auth(m.Token, m.HandleSubmitTask))
 	mux.HandleFunc("/tasks", middleware.Auth(m.Token, m.HandleGetAllTasks))
 	mux.HandleFunc("/nodes", middleware.Auth(m.Token, m.HandleGetNodes))
+
+	fs := http.FileServer(http.Dir("./web"))
+	mux.Handle("/", fs)
+
 	return http.ListenAndServe(m.Port, mux)
 }
 
@@ -98,7 +102,7 @@ func (m *Master) HandleSubmitTask(w http.ResponseWriter, r * http.Request) {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
-
+	task.SubmittedAt = time.Now().UnixMilli()
 	task.ID = uuid.NewString()
 
 	task.State = models.Pending

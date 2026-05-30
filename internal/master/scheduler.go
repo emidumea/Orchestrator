@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
-	"log"
 
 	"orchestrator/internal/gossip"
 	"orchestrator/internal/models"
@@ -34,7 +34,7 @@ func (m *Master) StartScheduler() {
 			continue
 		}
 
-		const estimatedMemCost uint64 = 50 // suppose each tasks needs at least 50MB of free memory
+		const estimatedMemCost uint64 = 50   // suppose each tasks needs at least 50MB of free memory
 		const estimatedCPUCost float64 = 5.0 // suppose it needs at least 5% of free CPU
 
 		for _, task := range tasks {
@@ -43,7 +43,6 @@ func (m *Master) StartScheduler() {
 				var bestWorker *gossip.Member
 				var bestScore float64 = -1
 
-
 				for i := range activeWorkers {
 					worker := &activeWorkers[i]
 
@@ -51,11 +50,11 @@ func (m *Master) StartScheduler() {
 						continue
 					}
 
-					score := float64(worker.MemoryFree) * 0.4 + worker.CPUFree * 0.6
+					score := float64(worker.MemoryFree)*0.4 + worker.CPUFree*0.6
 					if score > bestScore {
 						bestScore = score
 						bestWorker = worker
-	
+
 					}
 				}
 
@@ -64,17 +63,16 @@ func (m *Master) StartScheduler() {
 					continue
 				}
 
-
 				log.Printf("[Scheduler] Assigning task %s to worker %s\n", task.ID, bestWorker.ID)
 
-				err := m.dispatchTask(task, *bestWorker)
+				task.State = models.Scheduled
+				task.WorkerID = bestWorker.ID
+				err := m.Store.SaveTask(task)
 				if err != nil {
-					log.Printf("[Scheduler] Failed to dispatch task %s: %v\n", task.ID, err)
-					task.State = models.Failed
-					m.Store.SaveTask(task)
+					log.Printf("[Scheduler] failed to claim task %s: %v", task.ID, err)
 					continue
 				}
-				
+
 				for i := range activeWorkers {
 					if activeWorkers[i].ID == bestWorker.ID {
 						activeWorkers[i].MemoryFree -= estimatedMemCost
@@ -82,16 +80,15 @@ func (m *Master) StartScheduler() {
 						break
 					}
 				}
-				
 
-				for i := range tasks {
-					if tasks[i].ID == task.ID {
-						tasks[i].State = models.Running
-						tasks[i].WorkerID = bestWorker.ID
-						break
+				go func(t models.Task, w gossip.Member) {
+					err := m.dispatchTask(t, w)
+					if err != nil {
+						log.Printf("[Scheduler] Failed to dispatch task %s: %v\n", t.ID, err)
+						t.State = models.Failed
+						m.Store.SaveTask(t)
 					}
-				}
-
+				}(task, *bestWorker)
 
 			}
 		}
@@ -102,20 +99,20 @@ func (m *Master) StartScheduler() {
 func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 
 	task.ContainerName = fmt.Sprintf("task-%s-%d", task.ID[:8], time.Now().Unix())
-	
+	task.ScheduledAt = time.Now().UnixMilli()
+
 	jsonTask, err := json.Marshal(task)
 	if err != nil {
 		return fmt.Errorf("[Scheduler] An error occured while creating the JSON with the task data: %v", err)
 	}
 
 	startURL := fmt.Sprintf("http://%s%s/task/start", worker.IP, worker.APIPort)
-	
 
 	req, err := http.NewRequest("POST", startURL, bytes.NewBuffer(jsonTask))
 	if err != nil {
 		return fmt.Errorf("[Scheduler] Failed to create HTTP request for task %s: %v\n", task.ID, err)
 	}
-	
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+m.Token)
 
@@ -127,6 +124,7 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusCreated {
+		task.StartedAt = time.Now().UnixMilli()
 		log.Printf("[Scheduler] Task %s scheduled to worker %s successfully:\n", task.ID, worker.ID)
 
 		var updatedTask models.Task
@@ -134,8 +132,11 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 		if err != nil {
 			return fmt.Errorf("[Scheduler] An error occured while decoding the response from worker: %v", err)
 		}
-		
+
 		updatedTask.WorkerID = worker.ID
+		updatedTask.SubmittedAt = task.SubmittedAt
+		updatedTask.ScheduledAt = task.ScheduledAt
+		updatedTask.StartedAt = task.StartedAt
 
 		return m.Store.SaveTask(updatedTask)
 	}
@@ -145,9 +146,7 @@ func (m *Master) dispatchTask(task models.Task, worker gossip.Member) error {
 
 }
 
-
-
-func (m * Master) handleNodeFailure(nodeID string) {
+func (m *Master) handleNodeFailure(nodeID string) {
 	log.Printf("[Fault-Tolerance] Node %s is dead. Recovering tasks...\n", nodeID)
 
 	tasks, err := m.Store.ListTasks()
@@ -157,7 +156,7 @@ func (m * Master) handleNodeFailure(nodeID string) {
 	}
 
 	for _, task := range tasks {
-		if task.WorkerID == nodeID && task.State == models.Running {
+		if task.WorkerID == nodeID && (task.State == models.Running || task.State == models.Scheduled) {
 			log.Printf("[Fault-Tolerance] Recovering task %s\n", task.ID)
 
 			task.State = models.Pending

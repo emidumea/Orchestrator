@@ -1,3 +1,6 @@
 *.log
 *.db
 *.env
+*.png
+*.py
+*.csv

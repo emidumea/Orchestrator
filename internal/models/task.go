@@ -16,4 +16,7 @@ type Task struct {
 	ContainerName string
 	WorkerID string
 	State TaskState
+	SubmittedAt int64 `json:"submitted_at"`
+	ScheduledAt int64 `json:"scheduled_at"`
+	StartedAt int64 `json:"started_at"`
 }
