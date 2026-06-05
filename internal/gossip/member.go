@@ -58,11 +58,9 @@ func (ml *MembershipList) Merge(incomingMembers map[string]Member) {
 	for _, member := range incomingMembers {
 		localMember, exists := ml.Members[member.ID]
 
-		if !exists {
+		if !exists || member.Timestamp > localMember.Timestamp{
 			ml.Members[member.ID] = member
-		} else if member.Timestamp > localMember.Timestamp{
-			ml.Members[member.ID] = member
-		}
+		} 
 	}
 
 	ml.mu.Unlock()

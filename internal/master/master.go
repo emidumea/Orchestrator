@@ -47,8 +47,6 @@ func (m *Master) StartMaster() error {
 	m.Gossip.Start()
 	go m.StartScheduler()
 
-	mux.HandleFunc("/worker/register", m.HandleRegisterWorkerNode)
-
 	mux.HandleFunc("/task/submit", middleware.Auth(m.Token, m.HandleSubmitTask))
 	mux.HandleFunc("/tasks", middleware.Auth(m.Token, m.HandleGetAllTasks))
 	mux.HandleFunc("/nodes", middleware.Auth(m.Token, m.HandleGetNodes))
