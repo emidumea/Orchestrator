@@ -18,7 +18,7 @@ type GossipManager struct {
 	Transport *Transport
 	OnNodeDown func(nodeID string)
 	GetMetrics func() models.SystemMetrics
-	pendingAcks map[string]chan bool // nodeID -> channel which reveives true for ACK
+	pendingAcks map[string][]chan bool // list of channels for each node (nodeID -> channel which reveives true for ACK)
 	ackMu sync.Mutex
 }
 
@@ -37,12 +37,13 @@ func CreateGossipManager(nodeID string, gossipPort string, apiPort string) *Goss
 		APIPort: apiPort,
 		MemList: ml,
 		Transport: transport,
-		pendingAcks: make(map[string]chan bool),
+		pendingAcks: make(map[string][]chan bool),
 	}
 
-	transport.OnAck = func(nodeID string) {
+	transport.OnAck = func(aboutID string) {
 		gm.ackMu.Lock()
-		if ch, exists := gm.pendingAcks[nodeID]; exists {
+		channels := gm.pendingAcks[aboutID]
+		for _, ch := range channels {
 			select {
 			case ch <- true:
 			default:
@@ -51,6 +52,13 @@ func CreateGossipManager(nodeID string, gossipPort string, apiPort string) *Goss
 		gm.ackMu.Unlock()
 	}
 
+	transport.OnPingReq = func(requesterID, targetID, targetAddr string) {
+		alive := gm.probeNode(targetID, targetAddr)
+
+		if alive {
+			gm.Transport.sendAck(requesterID, targetID)
+		}
+	}
 	return gm
 }
 
@@ -112,20 +120,37 @@ func (gm *GossipManager) gossipLoop() {
 	}
 }
 
-func (gm *GossipManager) probeNode(member Member) bool {
+
+func (gm *GossipManager) registerAck(nodeID string) chan bool {
 	ackChan := make(chan bool, 1)
-
 	gm.ackMu.Lock()
-	gm.pendingAcks[member.ID] = ackChan
+	gm.pendingAcks[nodeID] = append(gm.pendingAcks[nodeID], ackChan)
 	gm.ackMu.Unlock()
+	return ackChan
+}
 
-	defer func() {
-		gm.ackMu.Lock()
-		delete(gm.pendingAcks, member.ID)
-		gm.ackMu.Unlock()
-	}()
+func (gm *GossipManager) unregisterAck(nodeID string, ackChan chan bool) {
+	gm.ackMu.Lock()
+	defer gm.ackMu.Unlock()
 
-	gm.Transport.sendPing(member.IP+member.GossipPort, gm.NodeID)
+	channels := gm.pendingAcks[nodeID]
+	for i, ch := range channels {
+		if ch == ackChan {
+			gm.pendingAcks[nodeID] = append(channels[:i], channels[i+1:]...)
+			break
+		}
+	}
+
+	if len(gm.pendingAcks[nodeID]) == 0 {
+		delete(gm.pendingAcks, nodeID)
+	}
+
+}
+func (gm *GossipManager) probeNode(targetID, targetAddr string) bool {
+	ackChan := gm.registerAck(targetID)
+	defer gm.unregisterAck(targetID, ackChan)
+
+	gm.Transport.sendPing(targetAddr, gm.NodeID)
 
 	select {
 	case <-ackChan:
@@ -136,6 +161,29 @@ func (gm *GossipManager) probeNode(member Member) bool {
 	}
 }
 
+func (gm *GossipManager) markAlive(nodeID string) {
+	gm.MemList.mu.Lock()
+	if member, exists := gm.MemList.Members[nodeID]; exists {
+		member.Timestamp = time.Now().Unix()
+		member.State = Active
+		gm.MemList.Members[nodeID] = member
+	}
+}
+
+func (gm *GossipManager) markDown(nodeID string) {
+	gm.MemList.mu.Lock()
+	wasActive := false
+	if member, exists := gm.MemList.Members[nodeID]; exists && member.State == Active {
+		member.State = Down
+		gm.MemList.Members[nodeID] = member
+		wasActive = true
+	}
+	gm.MemList.mu.Unlock()
+
+	if wasActive && gm.OnNodeDown != nil {
+		go gm.OnNodeDown(nodeID)
+	}
+}
 func (gm *GossipManager) cleanDeadMembersLoop() {
 	for {
 		time.Sleep(5 * time.Second)
@@ -147,17 +195,10 @@ func (gm *GossipManager) cleanDeadMembersLoop() {
 				continue
 			}
 
-			if time.Now().Unix() - member.Timestamp > 15 {
+			if time.Now().Unix() - member.Timestamp > 10 {
 				if member.State == Active {
 					suspects = append(suspects, member)
 					// log.Printf("[Gossip] WARNING: Node %s is DOWN\n", id)
-
-					// member.State = Down
-					// gm.MemList.Members[id] = member
-
-					// if gm.OnNodeDown != nil {
-					// 	go gm.OnNodeDown(id)
-					// }
 				}
 			}
 		}
@@ -165,34 +206,64 @@ func (gm *GossipManager) cleanDeadMembersLoop() {
 		gm.MemList.mu.Unlock()
 
 		for _, suspect := range suspects {
-			if gm.probeNode(suspect) {
+			if gm.probeNode(suspect.ID, suspect.IP+suspect.GossipPort) {
 				// node responded, is alive, so we update its timestamp
+				log.Printf("[Gossip SWIM] Node % is alive (direct ping)\n", suspect.ID)
+				gm.markAlive(suspect.ID)
+				continue
+			} 
 
-				gm.MemList.mu.Lock()
-
-				m := gm.MemList.Members[suspect.ID]
-				m.Timestamp = time.Now().Unix()
-				gm.MemList.Members[suspect.ID] = m
-
-				gm.MemList.mu.Unlock()
-
-				log.Printf("[Gossip] Node %s responded to ping, still alive\n", suspect.ID)
-			} else
-			{
-				gm.MemList.mu.Lock()
-
-				m := gm.MemList.Members[suspect.ID]
-				m.State = Down
-				gm.MemList.Members[suspect.ID] = m
-
-				gm.MemList.mu.Unlock()
-
-				log.Printf("[Gossip] Node %s did not respond to ping, marked DOWN\n", suspect.ID)
-
-				if gm.OnNodeDown != nil {
-					go gm.OnNodeDown(suspect.ID)
-				}
+			log.Printf("[Gossip SWIM] Direct ping to %s failed, trying indirect probe...\n", suspect.ID)
+			if gm.indirectProbe(suspect) {
+				log.Printf("[Gossip SWIM] Node %s is alive (indirect probe)", suspect.ID)
+				gm.markAlive(suspect.ID)
+				continue
 			}
+
+			log.Printf("[Gossip SWIM] Node %s did not respond to any pings (both probes failed), marked DOWN\n", suspect.ID)
+			gm.markDown(suspect.ID)
 		}
 	}
+}
+
+func (gm *GossipManager) indirectProbe(target Member) bool {
+	const k = 2
+
+	gm.MemList.mu.Lock()
+	helpers := make([]Member, 0)
+	for id, m := range gm.MemList.Members {
+		if id != gm.NodeID && id != target.ID && m.State == Active {
+			helpers = append(helpers, m)
+		}
+	}
+	gm.MemList.mu.Unlock()
+
+	if len(helpers) == 0 {
+		return false // no other members to ask
+	}
+
+	rand.Shuffle(len(helpers), func(i, j int) {
+		helpers[i], helpers[j] = helpers[j], helpers[i]
+	})
+
+	if len(helpers) > k {
+		helpers = helpers[:k]
+	}
+
+	ackChan := gm.registerAck(target.ID)
+	defer gm.unregisterAck(target.ID, ackChan)
+
+
+	targetAddr := target.IP + target.GossipPort
+	for _, helper := range helpers {
+		gm.Transport.sendPingReq(helper.IP+helper.GossipPort, target.ID, targetAddr)
+	}
+
+	select {
+	case <-ackChan:
+		return true // a helper confirmed the target is alive
+	case <-time.After(2 * time.Second):
+		return false // no helper managed to confirm
+	}
+
 }

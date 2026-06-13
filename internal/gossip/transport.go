@@ -144,11 +144,11 @@ func (t *Transport) sendPing(targetAddress string, senderID string) error {
 	return t.sendMessage(targetAddress, msg)
 }
 
-func (t *Transport) sendAck(targetID string, aboutID string) error {
+func (t *Transport) sendAck(toID string, aboutID string) error {
 	// find the address of the node who sent the ping
 
 	t.MemList.mu.Lock()
-	target, exists := t.MemList.Members[targetID]
+	to, exists := t.MemList.Members[toID]
 	t.MemList.mu.Unlock()
 
 	if (!exists) {
@@ -162,5 +162,16 @@ func (t *Transport) sendAck(targetID string, aboutID string) error {
 		AboutID: aboutID,
 	}
 	
-	return t.sendMessage(target.IP+target.GossipPort, msg)
+	return t.sendMessage(to.IP+to.GossipPort, msg)
+}
+
+func (t *Transport) sendPingReq(helperAddr string, targetID string, targetAddr string) error {
+	msg := Message{
+		Type: MsgPingReq,
+		SenderID: t.SelfNodeID,
+		TargetID: targetID,
+		TargetAddr: targetAddr,
+	}
+
+	return t.sendMessage(helperAddr, msg)
 }
