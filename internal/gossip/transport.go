@@ -83,7 +83,7 @@ func (t *Transport) handleMessage(msg Message, senderAddr *net.UDPAddr) {
 	}
 }
 
-func (t *Transport) SendGossip(targetAddress string, senderID string) error {
+func (t *Transport) SendGossip(targetAddress string, senderID string, members map[string]Member) error {
 	addr, err := net.ResolveUDPAddr("udp", targetAddress)
 	if err != nil {
 		return err
@@ -96,14 +96,12 @@ func (t *Transport) SendGossip(targetAddress string, senderID string) error {
 
 	defer conn.Close()
 
-	t.MemList.mu.Lock()
 	msg := Message{
 		Type: MsgGossip,
 		SenderID: senderID,
-		Members: t.MemList.Members,
+		Members: members,
 	}
 	data, err := json.Marshal(msg)
-	t.MemList.mu.Unlock()
 
 	if err != nil {
 		return err

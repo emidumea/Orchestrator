@@ -10,20 +10,17 @@ import (
 	"orchestrator/internal/utils"
 )
 
-
 type GossipManager struct {
-	NodeID string
-	APIPort string
-	MemList *MembershipList
-	Transport *Transport
-	OnNodeDown func(nodeID string)
-	GetMetrics func() models.SystemMetrics
+	NodeID      string
+	APIPort     string
+	MemList     *MembershipList
+	Transport   *Transport
+	OnNodeDown  func(nodeID string)
+	GetMetrics  func() models.SystemMetrics
 	pendingAcks map[string][]chan bool // list of channels for each node (nodeID -> channel which reveives true for ACK)
-	ackMu sync.Mutex
-	seedAddrs []string // bootstrap addresses
+	ackMu       sync.Mutex
+	seedAddrs   []string // bootstrap addresses
 }
-
-
 
 func CreateGossipManager(nodeID string, gossipPort string, apiPort string, seedAddrs []string) *GossipManager {
 	ml := CreateMembershipList()
@@ -33,13 +30,13 @@ func CreateGossipManager(nodeID string, gossipPort string, apiPort string, seedA
 
 	transport := CreateTransport(gossipPort, ml)
 
-	gm := &GossipManager {
-		NodeID: nodeID,
-		APIPort: apiPort,
-		MemList: ml,
-		Transport: transport,
+	gm := &GossipManager{
+		NodeID:      nodeID,
+		APIPort:     apiPort,
+		MemList:     ml,
+		Transport:   transport,
 		pendingAcks: make(map[string][]chan bool),
-		seedAddrs: seedAddrs,
+		seedAddrs:   seedAddrs,
 	}
 
 	transport.OnAck = func(aboutID string) {
@@ -66,23 +63,21 @@ func CreateGossipManager(nodeID string, gossipPort string, apiPort string, seedA
 
 func (gm *GossipManager) Start() {
 
-	go func () {
+	go func() {
 		if err := gm.Transport.StartListening(); err != nil {
 			log.Printf("[Gossip] Error starting gossip transport: %v\n", err)
 		}
 	}()
-
 
 	go gm.gossipLoop()
 	go gm.cleanDeadMembersLoop()
 
 }
 
-
 func (gm *GossipManager) gossipLoop() {
 	for {
 
-		if (gm.GetMetrics != nil) {
+		if gm.GetMetrics != nil {
 			metrics := gm.GetMetrics()
 			gm.MemList.UpdateMember(gm.NodeID, utils.GetLocalIP(), gm.Transport.Port, gm.APIPort, metrics.MemoryFree, metrics.CPUFree)
 		} else {
@@ -90,6 +85,8 @@ func (gm *GossipManager) gossipLoop() {
 		}
 
 		time.Sleep(2 * time.Second)
+
+		delta := gm.buildDelta()
 
 		gm.MemList.mu.Lock()
 		membersSlice := make([]Member, 0, len(gm.MemList.Members))
@@ -101,22 +98,29 @@ func (gm *GossipManager) gossipLoop() {
 		gm.MemList.mu.Unlock()
 
 		if len(membersSlice) == 0 {
-			for _, seed := range gm.seedAddrs {
-				gm.Transport.SendGossip(seed, gm.NodeID)
+			if len(delta) > 0 {
+				for _, seed := range gm.seedAddrs {
+					gm.Transport.SendGossip(seed, gm.NodeID, delta)
+				}
 			}
+
+		}
+
+		if len(delta) == 0 {
+			continue
 		}
 
 		rand.Shuffle(len(membersSlice), func(i, j int) {
 			membersSlice[i], membersSlice[j] = membersSlice[j], membersSlice[i]
 		})
-		
+
 		targetCount := 2
 		if len(membersSlice) < targetCount {
 			targetCount = len(membersSlice)
 		}
 
 		for i := 0; i < targetCount; i++ {
-			err := gm.Transport.SendGossip(membersSlice[i].IP + membersSlice[i].GossipPort, gm.NodeID)
+			err := gm.Transport.SendGossip(membersSlice[i].IP+membersSlice[i].GossipPort, gm.NodeID, delta)
 			if err != nil {
 				log.Printf("[Gossip] Error sending gossip to %s: %v\n", membersSlice[i].IP, err)
 			}
@@ -124,6 +128,20 @@ func (gm *GossipManager) gossipLoop() {
 	}
 }
 
+func (gm *GossipManager) buildDelta() map[string]Member {
+	gm.MemList.mu.Lock()
+	defer gm.MemList.mu.Unlock()
+
+	delta := make(map[string]Member)
+	for id, member := range gm.MemList.Members {
+		if member.disseminateCount > 0 {
+			delta[id] = member
+			member.disseminateCount--
+			gm.MemList.Members[id] = member
+		}
+	}
+	return delta
+}
 
 func (gm *GossipManager) registerAck(nodeID string) chan bool {
 	ackChan := make(chan bool, 1)
@@ -167,22 +185,30 @@ func (gm *GossipManager) probeNode(targetID, targetAddr string) bool {
 
 func (gm *GossipManager) markAlive(nodeID string) {
 	gm.MemList.mu.Lock()
+	defer gm.MemList.mu.Unlock()
+
 	if member, exists := gm.MemList.Members[nodeID]; exists {
 		member.Timestamp = time.Now().Unix()
 		member.State = Active
+		member.disseminateCount = gm.MemList.disseminationLimit()
+
 		gm.MemList.Members[nodeID] = member
+
 	}
 }
 
 func (gm *GossipManager) markDown(nodeID string) {
 	gm.MemList.mu.Lock()
+	defer gm.MemList.mu.Unlock()
+
 	wasActive := false
 	if member, exists := gm.MemList.Members[nodeID]; exists && member.State == Active {
 		member.State = Down
+		member.disseminateCount = gm.MemList.disseminationLimit()
+
 		gm.MemList.Members[nodeID] = member
 		wasActive = true
 	}
-	gm.MemList.mu.Unlock()
 
 	if wasActive && gm.OnNodeDown != nil {
 		go gm.OnNodeDown(nodeID)
@@ -199,7 +225,7 @@ func (gm *GossipManager) cleanDeadMembersLoop() {
 				continue
 			}
 
-			if time.Now().Unix() - member.Timestamp > 10 {
+			if time.Now().Unix()-member.Timestamp > 10 {
 				if member.State == Active {
 					suspects = append(suspects, member)
 					// log.Printf("[Gossip] WARNING: Node %s is DOWN\n", id)
@@ -215,7 +241,7 @@ func (gm *GossipManager) cleanDeadMembersLoop() {
 				log.Printf("[Gossip SWIM] Node %s is alive (direct ping)\n", suspect.ID)
 				gm.markAlive(suspect.ID)
 				continue
-			} 
+			}
 
 			log.Printf("[Gossip SWIM] Direct ping to %s failed, trying indirect probe...\n", suspect.ID)
 			if gm.indirectProbe(suspect) {
@@ -256,7 +282,6 @@ func (gm *GossipManager) indirectProbe(target Member) bool {
 
 	ackChan := gm.registerAck(target.ID)
 	defer gm.unregisterAck(target.ID, ackChan)
-
 
 	targetAddr := target.IP + target.GossipPort
 	for _, helper := range helpers {
