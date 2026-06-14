@@ -18,19 +18,17 @@ import (
 type Master struct {
 	Port string
 	Store *store.Store
-	WorkerNodes map[string]*models.Node
 	mu sync.Mutex
 	Gossip *gossip.GossipManager
 	Token string
 }
 
 func CreateMaster(port string, store *store.Store, token string) *Master {
-	gossipManager := gossip.CreateGossipManager("master-node", ":8081", port)
+	gossipManager := gossip.CreateGossipManager("master-node", ":8081", port, nil)
 
 	m := &Master {
 		Port: port,
 		Store: store,
-		WorkerNodes: make(map[string]*models.Node),
 		Gossip: gossipManager,
 		Token: token,
 	}
@@ -55,37 +53,6 @@ func (m *Master) StartMaster() error {
 	mux.Handle("/", fs)
 
 	return http.ListenAndServe(m.Port, mux)
-}
-
-func (m *Master) HandleRegisterWorkerNode(w http.ResponseWriter, r * http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var node models.Node
-
-	err := json.NewDecoder(r.Body).Decode(&node)
-	if err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-
-	node.State = models.NodeActive
-	node.LastSeen = time.Now()
-
-	m.mu.Lock()
-	m.WorkerNodes[node.ID] = & node
-	m.mu.Unlock()
-
-
-	log.Printf("[Master] Registered worker node: %s (Address: %s)\n", node.ID, node.Address)
-
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(node)
-
 }
 
 func (m *Master) HandleSubmitTask(w http.ResponseWriter, r * http.Request) {

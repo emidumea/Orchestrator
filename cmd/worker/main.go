@@ -46,7 +46,7 @@ func main() {
 
 	apiPort := flag.String("api", ":8080", "HTTP port for worker agent")
 	gossipPort := flag.String("gossip", ":8082", "UDP port for gossip communication")
-	masterAddr := flag.String("master", "localhost:8081", "Gossip address of the seed (master) node")
+	masterAddr := flag.String("master", "localhost:8081", "Comma-separated gossip addresses of seed nodes")
 
 	flag.Parse()
 
@@ -73,6 +73,4 @@ func main() {
 	log.Println("Shuttind down worker agent...")
 	workerAgent.Shutdown()
 	os.Exit(0)
-
-
 }

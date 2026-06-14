@@ -34,7 +34,7 @@ type TaskResponse struct {
 
 type NodeResponse struct {
 	ID      string `json:"id"`
-	Address string `json:"address"`
+	Address string `json:"ip"`
 	APIPort string `json:"api_port"`
 	State   string `json:"state"`
 }
@@ -209,7 +209,6 @@ func listNodes() {
 	w.Flush()
 }
 
-
 func handleExport() {
 	token := getToken()
 
@@ -241,7 +240,7 @@ func handleExport() {
 	defer writer.Flush()
 
 	header := []string{
-		"Task_ID", 
+		"Task_ID",
 		"Image",
 		"State",
 		"Worker_ID",
@@ -276,7 +275,7 @@ func handleExport() {
 				workerShortID = workerShortID[:8]
 			}
 
-			row := []string {
+			row := []string{
 				task.ID[:8],
 				task.Image,
 				string(task.State),

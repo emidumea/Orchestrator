@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
-	"sync"
 	"net"
+	"net/http"
+	"strings"
+	"sync"
+
 	"github.com/google/uuid"
 
 	"orchestrator/internal/docker"
@@ -27,17 +29,23 @@ type WorkerAgent struct {
 	mu sync.Mutex
 }
 
-func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort string, masterGossipAddr string, token string) *WorkerAgent {
+func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort string, seedAddrs string, token string) *WorkerAgent {
 	agentID := uuid.NewString()
 
-	gossipManager := gossip.CreateGossipManager(agentID, gossipPort, port)
-
-	masterIP, masterPortRaw, err := net.SplitHostPort(masterGossipAddr)
-	if err != nil {
-		log.Fatalf("[Worker] Master address is invalid: %v", err)
+	seeds := make([]string, 0)
+	for _, seed := range strings.Split(seedAddrs, ",") {
+		seed = strings.TrimSpace(seed)
+		if seed == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(seed); err != nil {
+			log.Printf("[Worker] Invalid seed address '%s', skipping: %v", seed, err)
+			continue
+		}
+		seeds = append(seeds, seed)
 	}
-	masterPort := ":" + masterPortRaw
-	gossipManager.MemList.UpdateMember("master-node", masterIP, masterPort, "", 0, 0)
+
+	gossipManager := gossip.CreateGossipManager(agentID, gossipPort, port, seeds)
 
 	gossipManager.GetMetrics = getSystemMetrics
 	

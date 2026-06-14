@@ -20,11 +20,12 @@ type GossipManager struct {
 	GetMetrics func() models.SystemMetrics
 	pendingAcks map[string][]chan bool // list of channels for each node (nodeID -> channel which reveives true for ACK)
 	ackMu sync.Mutex
+	seedAddrs []string // bootstrap addresses
 }
 
 
 
-func CreateGossipManager(nodeID string, gossipPort string, apiPort string) *GossipManager {
+func CreateGossipManager(nodeID string, gossipPort string, apiPort string, seedAddrs []string) *GossipManager {
 	ml := CreateMembershipList()
 
 	localIP := utils.GetLocalIP()
@@ -38,6 +39,7 @@ func CreateGossipManager(nodeID string, gossipPort string, apiPort string) *Goss
 		MemList: ml,
 		Transport: transport,
 		pendingAcks: make(map[string][]chan bool),
+		seedAddrs: seedAddrs,
 	}
 
 	transport.OnAck = func(aboutID string) {
@@ -99,7 +101,9 @@ func (gm *GossipManager) gossipLoop() {
 		gm.MemList.mu.Unlock()
 
 		if len(membersSlice) == 0 {
-			continue
+			for _, seed := range gm.seedAddrs {
+				gm.Transport.SendGossip(seed, gm.NodeID)
+			}
 		}
 
 		rand.Shuffle(len(membersSlice), func(i, j int) {
@@ -208,7 +212,7 @@ func (gm *GossipManager) cleanDeadMembersLoop() {
 		for _, suspect := range suspects {
 			if gm.probeNode(suspect.ID, suspect.IP+suspect.GossipPort) {
 				// node responded, is alive, so we update its timestamp
-				log.Printf("[Gossip SWIM] Node % is alive (direct ping)\n", suspect.ID)
+				log.Printf("[Gossip SWIM] Node %s is alive (direct ping)\n", suspect.ID)
 				gm.markAlive(suspect.ID)
 				continue
 			} 
