@@ -48,6 +48,7 @@ func (m *Master) StartMaster() error {
 	mux.HandleFunc("/task/submit", middleware.Auth(m.Token, m.HandleSubmitTask))
 	mux.HandleFunc("/tasks", middleware.Auth(m.Token, m.HandleGetAllTasks))
 	mux.HandleFunc("/nodes", middleware.Auth(m.Token, m.HandleGetNodes))
+	mux.HandleFunc("/task/complete", middleware.Auth(m.Token, m.handleCompleteTask))
 
 	fs := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fs)
@@ -134,4 +135,44 @@ func (m *Master) HandleGetNodes(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(nodes)
+}
+
+
+func (m *Master) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var report struct {
+		TaskID string `json:"task_id"`
+		ExitCode int64 `json:"exit_code"`
+		WorkerID string `json:"worker_id"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	task, err := m.Store.GetTask(report.TaskID)
+	if err != nil {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	if report.ExitCode == 0 {
+		task.State = models.Completed
+	} else {
+		task.State = models.Failed
+	}
+
+	if err := m.Store.SaveTask(*task); err != nil {
+		http.Error(w, "Failed to update task", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("[Master] Task %s reported as %s (exit code %d)\n", report.TaskID[:8], task.State, report.ExitCode)
+
+	w.WriteHeader(http.StatusOK)
 }

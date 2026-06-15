@@ -26,7 +26,7 @@ type TaskRequest struct {
 
 type TaskResponse struct {
 	ID            string `json:"ID"`
-	Image         string `json:"Image"`
+	Image         string `json:"image"`
 	State         string `json:"State"`
 	WorkerID      string `json:"WorkerID"`
 	ContainerName string `json:"ContainerName"`

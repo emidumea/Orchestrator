@@ -43,6 +43,11 @@ func main() {
 		log.Fatal("ORCHESTRATOR_TOKEN is not set")
 	}
 
+	masterURL := os.Getenv("MASTER_URL")
+	if masterURL == "" {
+		log.Println("[Warning] MASTER_URL not set, task completion reporting disabled.")
+	}
+
 
 	apiPort := flag.String("api", ":8080", "HTTP port for worker agent")
 	gossipPort := flag.String("gossip", ":8082", "UDP port for gossip communication")
@@ -58,7 +63,7 @@ func main() {
 		log.Fatalf("Failed to create docker manager: %v", err)
 	}
 
-	workerAgent := worker.CreateWorkerAgent(*apiPort, manager, *gossipPort, *masterAddr, token)
+	workerAgent := worker.CreateWorkerAgent(*apiPort, manager, *gossipPort, *masterAddr, token, masterURL)
 
 	go func() {
 		if err := workerAgent.StartWorker(); err != nil {

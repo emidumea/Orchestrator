@@ -11,9 +11,10 @@ import (
 )
 
 type ContainerInfo struct {
-	ID            string
+	ID string
 	ContainerName string
-	ImageName     string
+	ImageName string
+	Command []string
 }
 
 type DockerManager struct {
@@ -42,7 +43,10 @@ func (dm *DockerManager) StartContainer(ctx context.Context, config ContainerInf
 	io.Copy(os.Stdout, reader)
 
 	// create container
-	response, err := dm.cli.ContainerCreate(ctx, &container.Config{Image: config.ImageName}, &container.HostConfig{}, nil, nil, config.ContainerName)
+	response, err := dm.cli.ContainerCreate(ctx, &container.Config{
+		Image: config.ImageName,
+		Cmd: config.Command,
+		}, &container.HostConfig{}, nil, nil, config.ContainerName)
 	if err != nil {
 		return "", err
 	}
@@ -67,4 +71,14 @@ func (dm *DockerManager) StopContainer(ctx context.Context, containerID string) 
 	}
 
 	return nil
+}
+
+func (dm *DockerManager) WaitForContainer(ctx context.Context, containerID string) (int64, error){
+	statusCh, errCh := dm.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		return -1, err
+	case status := <-statusCh:
+		return status.StatusCode, nil
+	}
 }
