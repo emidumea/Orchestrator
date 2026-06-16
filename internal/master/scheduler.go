@@ -11,6 +11,8 @@ import (
 
 	"orchestrator/internal/gossip"
 	"orchestrator/internal/models"
+
+	"github.com/google/uuid"
 )
 
 func (m *Master) StartScheduler() {
@@ -67,6 +69,8 @@ func (m *Master) StartScheduler() {
 
 				task.State = models.Scheduled
 				task.WorkerID = bestWorker.ID
+				task.ExecutionToken = uuid.NewString()
+				log.Printf("[Scheduler] Task %s got token %s\n", task.ID[:8], task.ExecutionToken)
 				err := m.Store.SaveTask(task)
 				if err != nil {
 					log.Printf("[Scheduler] failed to claim task %s: %v", task.ID, err)

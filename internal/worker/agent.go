@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -19,6 +20,11 @@ import (
 	"orchestrator/internal/models"
 )
 
+type RunningTask struct {
+	ContainerID string
+	ExecutionToken string
+}
+
 type WorkerAgent struct {
 	Port string
 	NodeID string
@@ -27,7 +33,7 @@ type WorkerAgent struct {
 	Gossip *gossip.GossipManager
 	Token string
 
-	runningContainers map[string]string
+	runningContainers map[string]RunningTask
 	mu sync.Mutex
 }
 
@@ -58,7 +64,7 @@ func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort st
 		Gossip: gossipManager,
 		Token: token,
 		MasterURL: masterURL,
-		runningContainers: make(map[string]string),
+		runningContainers: make(map[string]RunningTask),
 	}
 }
 
@@ -66,6 +72,7 @@ func (wa *WorkerAgent) StartWorker() error {
 	mux := http.NewServeMux()
 
 	wa.Gossip.Start()
+	go wa.reconcileLoop()
 	
 	mux.HandleFunc("/task/start", middleware.Auth(wa.Token, wa.HandleStartTask))
 	mux.HandleFunc("/task/stop", middleware.Auth(wa.Token, wa.HandleStopTask))
@@ -103,7 +110,10 @@ func (wa *WorkerAgent) HandleStartTask(w http.ResponseWriter, r * http.Request) 
 
 	task.ContainerID = containerID
 	wa.mu.Lock()
-	wa.runningContainers[task.ID] = containerID
+	wa.runningContainers[task.ID] = RunningTask{
+		ContainerID: containerID,
+		ExecutionToken: task.ExecutionToken,
+	}
 	wa.mu.Unlock()
 	task.State = models.Running
 	
@@ -147,11 +157,11 @@ func (wa *WorkerAgent) Shutdown() {
 
 	log.Println("[Worker] Stopping all active containers...")
 
-	for taskID, containerID := range wa.runningContainers {
-		log.Printf("[Worker] Stopping container %s (task %s)\n", containerID, taskID)
-		err := wa.dm.StopContainer(context.Background(), containerID)
+	for taskID, rt := range wa.runningContainers {
+		log.Printf("[Worker] Stopping container %s (task %s)\n", rt.ContainerID, taskID)
+		err := wa.dm.StopContainer(context.Background(), rt.ContainerID)
 		if err != nil {
-			log.Printf("[Worker] Failed to stop container %s: %v\n", containerID, err)
+			log.Printf("[Worker] Failed to stop container %s: %v\n", rt.ContainerID, err)
 		}
 	}
 	log.Println("[Worker] Shutdown complete")
@@ -169,15 +179,14 @@ func (wa *WorkerAgent) waitAndReport(taskID, containerID string) {
 
 	log.Printf("[Worker] Task %s finished with exit code %d\n", taskID[:8], exitCode)
 	wa.mu.Lock()
+	rt := wa.runningContainers[taskID]
 	delete(wa.runningContainers, taskID)
 	wa.mu.Unlock()
 
-	wa.reportCompletion(taskID, exitCode)
-
-
+	wa.reportCompletion(taskID, exitCode, rt.ExecutionToken)
 }
 
-func (wa *WorkerAgent) reportCompletion(taskID string, exitCode int64) {
+func (wa *WorkerAgent) reportCompletion(taskID string, exitCode int64, execToken string) {
 	if wa.MasterURL == "" {
 		return
 	}
@@ -186,6 +195,7 @@ func (wa *WorkerAgent) reportCompletion(taskID string, exitCode int64) {
 		"task_id": taskID,
 		"exit_code": exitCode,
 		"worker_id":wa.NodeID,
+		"execution_token": execToken,
 	}
 
 	jsonData, _ := json.Marshal(payload)
@@ -210,4 +220,85 @@ func (wa *WorkerAgent) reportCompletion(taskID string, exitCode int64) {
 	defer resp.Body.Close()
 
 	log.Printf("[Worker] Reported completion for task %s (status %d)\n", taskID[:8], resp.StatusCode)
+}
+
+
+func (wa *WorkerAgent) reconcileLoop() {
+	for {
+		time.Sleep(10 * time.Second)
+
+		wa.mu.Lock()
+		type taskToken struct {
+			TaskID string `json:"task_id"`
+			ExecutionToken string `json:"execution_token"`
+		}
+		tasks := make([]taskToken, 0, len(wa.runningContainers))
+		for taskID, rt := range wa.runningContainers {
+			tasks = append(tasks, taskToken {
+				TaskID: taskID,
+				ExecutionToken: rt.ExecutionToken,
+			})
+		}
+
+		wa.mu.Unlock()
+
+		if len(tasks) == 0 {
+			continue
+		}
+
+		// batching - one request including all the tasks
+		payload := map[string]interface{}{
+			"worker_id": wa.NodeID,
+			"tasks": tasks,
+		}
+
+		jsonData, _ := json.Marshal(payload)
+
+		url := wa.MasterURL + "/task/verify"
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+		if err != nil {
+			continue
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+wa.Token)
+
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("[Reconcile] Could not reach master: %v\n", err)
+			continue
+		}
+
+		var result struct {
+			InvalidTasks []string `json:"invalid_tasks"`
+		}
+
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		for _, taskID := range result.InvalidTasks {
+			wa.mu.Lock()
+			rt, exists := wa.runningContainers[taskID]
+			wa.mu.Unlock()
+
+			if !exists {
+				continue
+			}
+
+			log.Printf("[Reconcile] Task %s no longer belongs to this worker. Stopping orphan container...\n", taskID[:8])
+
+			if err := wa.dm.StopContainer(context.Background(), rt.ContainerID); err != nil {
+				log.Printf("[Reconcile] Failed to stop orphan container: %v\n", err)
+				continue
+			}
+
+			wa.mu.Lock()
+			delete(wa.runningContainers, taskID)
+			wa.mu.Unlock()
+		}
+	}
 }

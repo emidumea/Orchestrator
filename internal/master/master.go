@@ -49,7 +49,7 @@ func (m *Master) StartMaster() error {
 	mux.HandleFunc("/tasks", middleware.Auth(m.Token, m.HandleGetAllTasks))
 	mux.HandleFunc("/nodes", middleware.Auth(m.Token, m.HandleGetNodes))
 	mux.HandleFunc("/task/complete", middleware.Auth(m.Token, m.handleCompleteTask))
-
+	mux.HandleFunc("/task/verify", middleware.Auth(m.Token, m.HandleVerifyTasks)) // task reconciliation endpoint
 	fs := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fs)
 
@@ -148,6 +148,7 @@ func (m *Master) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 		TaskID string `json:"task_id"`
 		ExitCode int64 `json:"exit_code"`
 		WorkerID string `json:"worker_id"`
+		ExecutionToken string `json:"execution_token"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
@@ -158,6 +159,12 @@ func (m *Master) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 	task, err := m.Store.GetTask(report.TaskID)
 	if err != nil {
 		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+
+	if task.ExecutionToken != report.ExecutionToken {
+		log.Printf("[Master] Rejected old report for task %s from worker %s (token mismatch)\n", report.TaskID[:8], report.WorkerID)
+		http.Error(w, "Old execution token, report rejected", http.StatusConflict)
 		return
 	}
 
@@ -175,4 +182,47 @@ func (m *Master) handleCompleteTask(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[Master] Task %s reported as %s (exit code %d)\n", report.TaskID[:8], task.State, report.ExitCode)
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (m *Master) HandleVerifyTasks(w http.ResponseWriter, r * http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var request struct {
+		WorkerID string `json:"worker_id"`
+		Tasks []struct {
+			TaskID string `json:"task_id"`
+			ExecutionToken string `json:"execution_token"`
+		} `json:"tasks"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	invalidTasks := make([]string, 0)
+
+	for _, t := range request.Tasks {
+		task, err := m.Store.GetTask(t.TaskID)
+		if err != nil {
+			// the task no longer exists in store, must be stopped
+			invalidTasks = append(invalidTasks, t.TaskID)
+			continue
+		}
+
+		// task no longer belongs to the worker or the token does not match
+		if task.WorkerID != request.WorkerID || task.ExecutionToken != t.ExecutionToken {
+			invalidTasks = append(invalidTasks, t.TaskID)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]string{
+		"invalid_tasks": invalidTasks,
+	})
+
+
 }
