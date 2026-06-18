@@ -53,7 +53,7 @@ func (m *Master) StartMaster() error {
 	fs := http.FileServer(http.Dir("./web"))
 	mux.Handle("/", fs)
 
-	return http.ListenAndServe(m.Port, mux)
+	return http.ListenAndServeTLS(m.Port, "certs/cert.pem", "certs/key.pem", mux)
 }
 
 func (m *Master) HandleSubmitTask(w http.ResponseWriter, r * http.Request) {

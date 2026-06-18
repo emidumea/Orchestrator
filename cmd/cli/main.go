@@ -63,9 +63,9 @@ func getToken() string {
 		masterURL = "http://localhost:3000"
 	}
 
-	fmt.Printf("DEBUG Token: '%s'\n", token)
 	return token
 }
+
 func submitTask(image string, command []string) {
 	token := getToken()
 
@@ -209,7 +209,6 @@ func listNodes() {
 	w.Flush()
 }
 
-
 func handleExport() {
 	token := getToken()
 
@@ -241,7 +240,7 @@ func handleExport() {
 	defer writer.Flush()
 
 	header := []string{
-		"Task_ID", 
+		"Task_ID",
 		"Image",
 		"State",
 		"Worker_ID",
@@ -256,7 +255,7 @@ func handleExport() {
 	writer.Write(header)
 	count := 0
 	for _, task := range tasks {
-		if task.State == models.Running || task.State == models.Failed {
+		if task.ScheduledAt > 0 {
 			waitLatency := task.ScheduledAt - task.SubmittedAt
 			bootLatency := task.StartedAt - task.ScheduledAt
 			totalLatency := task.StartedAt - task.SubmittedAt
@@ -276,7 +275,7 @@ func handleExport() {
 				workerShortID = workerShortID[:8]
 			}
 
-			row := []string {
+			row := []string{
 				task.ID[:8],
 				task.Image,
 				string(task.State),

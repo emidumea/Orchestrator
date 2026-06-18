@@ -5,7 +5,7 @@ import (
 	"io"
 	"log"
 	"os"
-
+	"path/filepath"
 	"github.com/joho/godotenv"
 
 	"orchestrator/internal/master"
@@ -14,6 +14,7 @@ import (
 )
 
 func setupLogger(fileName string) *os.File {
+	os.MkdirAll(filepath.Dir(fileName), 0755)
 	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("Failed to open log file: %v", err)
@@ -28,7 +29,7 @@ func setupLogger(fileName string) *os.File {
 }
 
 func main() {
-	logFile := setupLogger("orchestrator.log")
+	logFile := setupLogger("logs/orchestrator.log")
 	defer logFile.Close()
 
 	err := godotenv.Load()

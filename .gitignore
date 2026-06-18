@@ -3,4 +3,4 @@
 *.env
 *.png
 *.py
-*.csv
+*.csvcerts/key.pem

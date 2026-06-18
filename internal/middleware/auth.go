@@ -18,7 +18,7 @@ func Auth(expectedToken string, next http.HandlerFunc) http.HandlerFunc {
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		if token != expectedToken {
-			log.Printf("[Security] Acces denied (invalid token) from %s", r.RemoteAddr)
+			log.Printf("[Security] Access denied (invalid token) from %s", r.RemoteAddr)
 			http.Error(w, "Unauthorized: Invalid token", http.StatusUnauthorized)
 			return
 		}

@@ -2,10 +2,13 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -16,6 +19,7 @@ import (
 )
 
 func setupLogger(fileName string) *os.File {
+	os.MkdirAll(filepath.Dir(fileName), 0755)
 	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("Failed to open log file: %v", err)
@@ -30,9 +34,6 @@ func setupLogger(fileName string) *os.File {
 }
 
 func main() {
-	logFile := setupLogger("worker.log")
-	defer logFile.Close()
-
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("[Warning] No .env file found. Using default environment variables.")
@@ -54,6 +55,11 @@ func main() {
 	masterAddr := flag.String("master", "localhost:8081", "Comma-separated gossip addresses of seed nodes")
 
 	flag.Parse()
+
+	cleanPort := strings.TrimPrefix(*apiPort, ":")
+	logFileName := fmt.Sprintf("logs/worker_%s.log", cleanPort)
+	logFile := setupLogger(logFileName)
+	defer logFile.Close()
 
 	myIP := utils.GetLocalIP()
 	log.Printf("[System] Worker node starting on IP: %s", myIP)
