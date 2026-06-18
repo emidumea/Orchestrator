@@ -4,3 +4,4 @@
 *.png
 *.py
 *.csvcerts/key.pem
+certs/
