@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"orchestrator/internal/models"
+	"orchestrator/internal/utils"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -60,7 +61,7 @@ func getToken() string {
 	}
 	masterURL = os.Getenv("MASTER_URL")
 	if masterURL == "" {
-		masterURL = "http://localhost:3000"
+		masterURL = "https://localhost:3000"
 	}
 
 	return token
@@ -89,7 +90,12 @@ func submitTask(image string, command []string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{}
+	client, err := utils.NewSecureClient("certs/cert.pem")
+	if err != nil {
+		log.Fatalf("An error occured while creating the secure client: %v\n", err)
+		return
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("Failed to submit task to master: %v\n", err)
@@ -118,7 +124,11 @@ func listTasks() {
 
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{}
+	client, err := utils.NewSecureClient("certs/cert.pem")
+	if err != nil {
+		log.Fatalf("An error occured while creating the secure client: %v\n", err)
+		return
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("Failed to submit task to master: %v\n", err)
@@ -175,7 +185,12 @@ func listNodes() {
 
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{}
+	client, err := utils.NewSecureClient("certs/cert.pem")
+	if err != nil {
+		log.Fatalf("An error occured while creating the secure client: %v\n", err)
+		return
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Printf("Failed to submit task to master: %v\n", err)
@@ -215,7 +230,12 @@ func handleExport() {
 	req, _ := http.NewRequest("GET", masterURL+"/tasks", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{}
+	client, err := utils.NewSecureClient("certs/cert.pem")
+	if err != nil {
+		log.Fatalf("An error occured while creating the secure client: %v\n", err)
+		return
+	}
+	
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatalf("Failed to fetch tasks: %v", err)

@@ -59,13 +59,13 @@ func main() {
 	myIP := utils.GetLocalIP()
 	log.Printf("--------------------------------")
 	log.Printf("Master node is live")
-	log.Printf("Master address for cli: http://%s:%s", myIP, port)
+	log.Printf("Master address for cli: https://%s:%s", myIP, port)
 	log.Printf("Master address for workers: %s:8081", myIP)
 	log.Printf("--------------------------------")
 
 	envMap, err := godotenv.Read(".env")
 	if err == nil {
-		envMap["MASTER_URL"] = fmt.Sprintf("http://%s:%s", myIP, port)
+		envMap["MASTER_URL"] = fmt.Sprintf("https://%s:%s", myIP, port)
 
 		err = godotenv.Write(envMap, ".env")
 		if err != nil {

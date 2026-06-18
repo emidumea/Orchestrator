@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
 
 func NewSecureClient(certPath string) (*http.Client, error) {
@@ -28,6 +29,7 @@ func NewSecureClient(certPath string) (*http.Client, error) {
 	}
 
 	client := &http.Client{
+		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,

@@ -18,6 +18,7 @@ import (
 	"orchestrator/internal/gossip"
 	"orchestrator/internal/middleware"
 	"orchestrator/internal/models"
+	"orchestrator/internal/utils"
 )
 
 type RunningTask struct {
@@ -35,6 +36,7 @@ type WorkerAgent struct {
 
 	runningContainers map[string]RunningTask
 	mu sync.Mutex
+	httpClient *http.Client
 }
 
 func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort string, seedAddrs string, token string, masterURL string) *WorkerAgent {
@@ -57,6 +59,11 @@ func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort st
 
 	gossipManager.GetMetrics = getSystemMetrics
 	
+	client, err := utils.NewSecureClient("certs/cert.pem")
+	if err != nil {
+		log.Fatalf("An error occured while creating the secure client: %v\n", err)
+	}
+	
 	return &WorkerAgent {
 		NodeID: agentID,
 		Port: port,
@@ -65,6 +72,7 @@ func CreateWorkerAgent(port string, manager *docker.DockerManager, gossipPort st
 		Token: token,
 		MasterURL: masterURL,
 		runningContainers: make(map[string]RunningTask),
+		httpClient: client,
 	}
 }
 
@@ -210,8 +218,8 @@ func (wa *WorkerAgent) reportCompletion(taskID string, exitCode int64, execToken
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+wa.Token)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	
+	resp, err := wa.httpClient.Do(req)
 	if err != nil {
 		log.Printf("[Worker] Failed to report completion for task %s: %v\n", taskID[:8], err)
 		return
@@ -263,8 +271,8 @@ func (wa *WorkerAgent) reconcileLoop() {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+wa.Token)
 
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, err := client.Do(req)
+
+		resp, err := wa.httpClient.Do(req)
 		if err != nil {
 			log.Printf("[Reconcile] Could not reach master: %v\n", err)
 			continue
